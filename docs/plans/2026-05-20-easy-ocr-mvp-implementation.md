@@ -6,7 +6,7 @@
 
 **Architecture:** The backend owns the canonical `ProblemDocument`, job lifecycle, storage, exports, model-call logs, and review issues. The frontend is a debugging and review console that calls the API, shows job state, previews documents/assets/exports, and creates issues. The first implementation uses a mock OCR pipeline and local storage so the whole product flow works before real OCR and figure detection are added.
 
-**Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, SQLModel, SQLite, pytest, httpx, LiteLLM, Node.js, Next.js, TypeScript, TanStack Query, Vitest or Playwright for frontend smoke tests.
+**Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, SQLModel, SQLite, pytest, httpx, LiteLLM, Node.js, Next.js 16, React 19, TypeScript, Tailwind CSS v3, TanStack Query, Playwright for visual smoke tests.
 
 ---
 
@@ -25,6 +25,8 @@
 - The frontend must support light and dark themes from the first implementation pass.
 - Do not write a large hand-authored CSS theme. Use Tailwind CSS utilities, semantic Tailwind tokens, and a small `globals.css` containing only Tailwind directives and base document rules.
 - Do not hard-code display strings directly in UI components. Route visible copy through the i18n dictionary unless it is OCR sample content.
+- Do not use `next lint`; it is removed in Next.js 16. Use `tsc --noEmit` and `next build` as the MVP frontend verification commands.
+- Use Tailwind CSS v3 setup for this MVP: `tailwindcss@3`, `postcss`, `autoprefixer`, `tailwind.config.ts`, and Tailwind directives in `globals.css`.
 
 ## Frontend Reference Requirements
 
@@ -114,6 +116,18 @@ storage/
 
 ---
 
+## Audit Notes Before Execution
+
+- This plan was audited after the frontend mockup and later i18n/theme/Tailwind requirements were added.
+- Frontend verification intentionally uses `npm run typecheck` and `npm run build`, not `next lint`.
+- Tailwind is pinned to the v3 configuration path to keep `tailwind.config.ts` and `postcss.config.mjs` straightforward for the MVP.
+- Next.js is specified as v16 with React 19. If package installation fails due to registry timing, use the latest stable Next.js 15/16 pair that supports React 19, then update this plan and commit the lockfile.
+- Pydantic recursive block schemas require `model_rebuild()` calls in `document.py`.
+- Mock data may contain OCR sample text directly; application UI labels must come from `lib/i18n.ts`.
+- The repository in this early stage may not have a dedicated worktree yet. If executing directly on `main`, commit after every task as written and push only after verification.
+
+---
+
 ### Task 1: Backend Project Skeleton
 
 **Files:**
@@ -184,7 +198,7 @@ target-version = "py311"
 
 Create `apps/api/README.md`:
 
-```markdown
+````markdown
 # easy-OCR API
 
 FastAPI backend for the easy-OCR MVP.
@@ -199,7 +213,7 @@ pip install -e ".[dev]"
 pytest
 uvicorn app.main:app --reload
 ```
-```
+````
 
 **Step 3: Run test to verify it fails**
 
@@ -498,6 +512,12 @@ class ProblemDocument(BaseModel):
     problems: list[Problem]
     assets: list[FigureAsset] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
+
+
+ChoiceItem.model_rebuild()
+ChoicesBlock.model_rebuild()
+Problem.model_rebuild()
+ProblemDocument.model_rebuild()
 ```
 
 Create `apps/api/app/schemas/job.py`:
@@ -2163,7 +2183,7 @@ Expected: all tests PASS.
 
 Modify `README.md` to include:
 
-```markdown
+````markdown
 ## MVP API Flow
 
 ```bash
@@ -2175,11 +2195,11 @@ uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/docs`.
-```
+````
 
 Modify `apps/api/README.md` to include example curl commands:
 
-```markdown
+````markdown
 ## Example
 
 ```bash
@@ -2188,7 +2208,7 @@ curl -X POST http://127.0.0.1:8000/api/jobs \
   -F quality_policy=report_only \
   -F file=@sample.png
 ```
-```
+````
 
 **Step 3: Run docs-adjacent check**
 
@@ -2247,13 +2267,14 @@ Create `apps/web/package.json`:
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "next lint"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "lucide-react": "^0.468.0",
     "@tanstack/react-query": "^5.59.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.0.0",
     "next-themes": "^0.4.4",
-    "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -2354,6 +2375,7 @@ Create `apps/web/tsconfig.json`:
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }],
+    "baseUrl": ".",
     "paths": { "@/*": ["./*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
@@ -2491,6 +2513,10 @@ export const dictionaries = {
       readyModels: "模型: 4/4 就绪",
       theme: "主题",
       language: "语言",
+      light: "白天",
+      dark: "夜间",
+      notifications: "通知",
+      unknownUploadError: "上传失败",
     },
     panels: {
       sourceImage: "源图片",
@@ -2501,6 +2527,13 @@ export const dictionaries = {
       qualitySummary: "质量摘要",
       riskLevel: "风险等级",
       topIssues: "主要问题",
+      problem: "题目",
+      confidence: "置信度",
+      lowConfidence: "低置信度",
+      answerExplanation: "答案与解析",
+      newCrop: "新裁剪",
+      refreshSource: "刷新源图片",
+      cropSettings: "裁剪设置",
     },
     diagnostics: {
       json: "JSON",
@@ -2531,6 +2564,10 @@ export const dictionaries = {
       readyModels: "Models: 4/4 Ready",
       theme: "Theme",
       language: "Language",
+      light: "Light",
+      dark: "Dark",
+      notifications: "Notifications",
+      unknownUploadError: "Unknown upload error",
     },
     panels: {
       sourceImage: "Source Image",
@@ -2541,6 +2578,13 @@ export const dictionaries = {
       qualitySummary: "Quality Summary",
       riskLevel: "Risk Level",
       topIssues: "Top Issues",
+      problem: "Problem",
+      confidence: "Confidence",
+      lowConfidence: "Low confidence",
+      answerExplanation: "Answer & Explanation",
+      newCrop: "New Crop",
+      refreshSource: "Refresh source image",
+      cropSettings: "Figure crop settings",
     },
     diagnostics: {
       json: "JSON",
@@ -2598,7 +2642,10 @@ Create `apps/web/components/layout/theme-toggle.tsx`:
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
+
 export function ThemeToggle() {
+  const { t } = useConsolePreferences();
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   return (
@@ -2608,7 +2655,7 @@ export function ThemeToggle() {
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {isDark ? <Sun size={15} /> : <Moon size={15} />}
-      {isDark ? "Light" : "Dark"}
+      {isDark ? t.actions.light : t.actions.dark}
     </button>
   );
 }
@@ -2688,7 +2735,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </span>
           <ThemeToggle />
           <LanguageToggle />
-          <button className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Notifications">
+          <button className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label={t.actions.notifications}>
             <Bell size={16} />
           </button>
         </div>
@@ -2851,7 +2898,7 @@ export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
       <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t.panels.sourceImage}</h2>
-          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Refresh source image">
+          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label={t.panels.refreshSource}>
             <RefreshCw size={15} />
           </button>
         </div>
@@ -2879,7 +2926,7 @@ export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
       <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t.panels.figureCrops}</h2>
-          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Figure crop settings">
+          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label={t.panels.cropSettings}>
             <Settings size={15} />
           </button>
         </div>
@@ -2893,7 +2940,7 @@ export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
           ))}
           <button className="grid h-24 w-28 place-items-center rounded-md border border-dashed border-border bg-surface text-sm text-muted hover:bg-surface-subtle" aria-label="Create new crop">
             <Plus size={18} />
-            <span>New Crop</span>
+            <span>{t.panels.newCrop}</span>
           </button>
         </div>
       </section>
@@ -2939,8 +2986,8 @@ export function StructuredPreview({ document }: StructuredPreviewProps) {
 
       <article className="mb-4 rounded-lg border border-border p-3.5">
         <div className="mb-3 flex items-center gap-2.5">
-          <strong>Problem 1</strong>
-          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">Confidence: 0.86</span>
+          <strong>{t.panels.problem} 1</strong>
+          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">{t.panels.confidence}: 0.86</span>
         </div>
         <div className="my-2 rounded-md border border-info/30 bg-info-soft p-3 text-sm leading-7">
           如图所示，物体从斜面上的 A 点由静止滑下，经过 B 点后水平飞出（不计空气阻力）。
@@ -2961,14 +3008,14 @@ export function StructuredPreview({ document }: StructuredPreviewProps) {
           ))}
         </div>
         <button className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle">
-          Answer & Explanation <ChevronRight size={15} />
+          {t.panels.answerExplanation} <ChevronRight size={15} />
         </button>
       </article>
 
       <article className="rounded-lg border border-border p-3.5">
         <div className="mb-3 flex items-center gap-2.5">
-          <strong>Problem 2</strong>
-          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">Low confidence</span>
+          <strong>{t.panels.problem} 2</strong>
+          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">{t.panels.lowConfidence}</span>
         </div>
         <div className="rounded-md border border-info/30 bg-info-soft p-3 text-sm leading-7">
           如图，电路中电源电动势为 E，内阻为 r，定值电阻为 R。
@@ -3144,7 +3191,7 @@ export default function HomePage() {
 
 Create `apps/web/README.md`:
 
-```markdown
+````markdown
 # easy-OCR Web
 
 Next.js debugging console for the easy-OCR API.
@@ -3154,7 +3201,7 @@ cd apps/web
 npm install
 npm run dev
 ```
-```
+````
 
 **Step 3: Install and build**
 
@@ -3163,10 +3210,10 @@ Run:
 ```bash
 cd apps/web
 npm install
-npm run build
+npm run check
 ```
 
-Expected: build succeeds.
+Expected: typecheck and build succeed.
 
 **Step 4: Commit**
 
@@ -3343,7 +3390,7 @@ export default function HomePage() {
                 accept="image/*"
                 onChange={(event) => {
                   handleFile(event.target.files?.[0] ?? null).catch((caught) => {
-                    setError(caught instanceof Error ? caught.message : "Unknown upload error");
+                    setError(caught instanceof Error ? caught.message : t.actions.unknownUploadError);
                   });
                 }}
               />
@@ -3379,10 +3426,10 @@ Run:
 
 ```bash
 cd apps/web
-npm run build
+npm run check
 ```
 
-Expected: build succeeds.
+Expected: typecheck and build succeed.
 
 **Step 4: Commit**
 
@@ -3446,10 +3493,10 @@ If defects appear, modify only the affected frontend files and rebuild:
 
 ```bash
 cd apps/web
-npm run build
+npm run check
 ```
 
-Expected: build succeeds and visual defects are resolved.
+Expected: typecheck and build succeed and visual defects are resolved.
 
 **Step 5: Commit visual fixes**
 
@@ -3567,10 +3614,10 @@ Run:
 
 ```bash
 cd apps/web
-npm run build
+npm run check
 ```
 
-Expected: build succeeds.
+Expected: typecheck and build succeed.
 
 **Step 3: Check git status**
 
@@ -3612,3 +3659,17 @@ Expected: branch `main` pushes to `origin/main`.
 - Batch paper splitting.
 
 Those should become separate plans after the API and debug console can run end to end.
+
+## Plan Audit Checklist
+
+Before executing this plan, confirm:
+
+- Markdown code fences render correctly, especially README snippets that contain nested fenced code blocks.
+- Backend tests can import `app.main` from `apps/api` using the `pythonpath = ["."]` pytest setting.
+- `document.py` includes `model_rebuild()` calls for recursive content blocks.
+- Frontend package scripts use `typecheck`, `build`, and `check`; no task depends on `next lint`.
+- Tailwind config includes every semantic color used by components.
+- All UI labels in layout, navigation, panels, tabs, actions, and fallback errors come from `lib/i18n.ts`.
+- OCR sample content may stay literal Chinese because it represents extracted exercise content, not application UI.
+- Visual verification checks Chinese, English, light mode, and dark mode.
+- `storage/` runtime data remains ignored by git.
