@@ -19,6 +19,56 @@
 - Use `schema_version` and `document_version` from the beginning.
 - Prefer explicit warnings and quality reports over hidden failures.
 - Every commit should leave tests passing for the area touched.
+- The frontend must follow the supplied console mockup: it is a dense engineering console, not a marketing page or a simple upload demo.
+- Use a refined operational-tool aesthetic: light surface, compact navigation, status chips, timeline diagnostics, strong scanning hierarchy, and stable pane dimensions.
+
+## Frontend Reference Requirements
+
+The supplied mockup changes the frontend target from "basic debug page" to "OCR Exercise Console". Treat this as the visual and UX reference for the first real frontend pass.
+
+Required top-level navigation:
+
+```text
+Dashboard
+Jobs
+Create Job
+Issues
+Exports
+Models
+Settings
+```
+
+Required job-detail layout:
+
+```text
+top: app nav, debug-mode selector, model readiness chip, notifications, user menu
+subtop: back link, job title, status chip, created time, mode, quality policy
+center top: pipeline progress stepper
+left column: source image viewer, bbox overlay controls, figure crops, image info
+middle column: structured preview and edit tab, document version selector, fullscreen action
+right column: tabbed diagnostics, quality summary, risk level, top issues
+footer: schema version, document version, renderer versions, storage/API connection status
+```
+
+Required diagnostics tabs:
+
+```text
+JSON
+Model Calls
+Exports
+Quality Report
+Issues
+Assets
+```
+
+Required visual behavior:
+
+- The source image panel must show colored OCR regions for text, formula, figure, low confidence, and unknown.
+- Figure crops must show selected state, score, and a "New Crop" affordance.
+- The structured preview must render problem cards with text blocks, figure blocks, options, confidence, and low-confidence chips.
+- Model calls must show role, model name, prompt version, input asset, status, token count, latency, and warning/error messages.
+- Quality summary must show severity counts and risk level.
+- The layout must remain usable at desktop sizes first; mobile can collapse columns later, but text must not overlap.
 
 ## Target Repository Shape
 
@@ -41,6 +91,8 @@ apps/
   web/
     app/
     components/
+      console/
+      layout/
     lib/
     package.json
     README.md
@@ -1807,7 +1859,283 @@ git commit -m "feat(api): add LiteLLM model client boundary"
 
 ---
 
-### Task 11: Backend Full Test Pass and API Documentation Update
+### Task 11: Job Console Support APIs
+
+**Files:**
+- Modify: `apps/api/app/schemas/job.py`
+- Modify: `apps/api/app/services/mock_pipeline.py`
+- Modify: `apps/api/app/services/repository.py`
+- Modify: `apps/api/app/api/jobs.py`
+- Create: `apps/api/tests/test_console_support_api.py`
+
+**Step 1: Write failing console support API tests**
+
+Create `apps/api/tests/test_console_support_api.py`:
+
+```python
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def _create_job(client: TestClient) -> str:
+    response = client.post(
+        "/api/jobs",
+        data={"mode": "debug", "quality_policy": "report_only"},
+        files={"file": ("question_001.png", b"fake-image", "image/png")},
+    )
+    assert response.status_code == 201
+    return response.json()["job_id"]
+
+
+def test_job_console_support_endpoints_return_mock_diagnostics():
+    client = TestClient(app)
+    job_id = _create_job(client)
+
+    assets = client.get(f"/api/jobs/{job_id}/assets")
+    assert assets.status_code == 200
+    assert assets.json()[0]["figure_id"].startswith("fig_")
+
+    quality = client.get(f"/api/jobs/{job_id}/quality-report")
+    assert quality.status_code == 200
+    assert quality.json()["items"][0]["category"] == "mock_pipeline"
+
+    model_calls = client.get(f"/api/jobs/{job_id}/model-calls")
+    assert model_calls.status_code == 200
+    assert model_calls.json()[0]["role"] == "vision_ocr"
+    assert model_calls.json()[0]["status"] == "success"
+
+
+def test_job_timeline_exposes_pipeline_steps_for_stepper():
+    client = TestClient(app)
+    job_id = _create_job(client)
+
+    response = client.get(f"/api/jobs/{job_id}/timeline")
+
+    assert response.status_code == 200
+    steps = response.json()
+    assert [step["key"] for step in steps] == [
+        "upload",
+        "preprocess",
+        "layout",
+        "crop_figures",
+        "ocr",
+        "structure",
+        "validate",
+        "quality",
+        "export",
+    ]
+    assert steps[-1]["status"] == "completed"
+```
+
+**Step 2: Run test to verify it fails**
+
+Run:
+
+```bash
+cd apps/api
+python -m pytest tests/test_console_support_api.py -v
+```
+
+Expected: FAIL because assets, quality report, model calls, and timeline endpoints do not exist.
+
+**Step 3: Add model call and timeline schemas**
+
+Modify `apps/api/app/schemas/job.py` and append:
+
+```python
+class ModelCallRead(BaseModel):
+    model_call_id: str
+    role: str
+    model: str
+    prompt_version: str
+    input_assets: list[str] = Field(default_factory=list)
+    status: str
+    latency_seconds: float | None = None
+    token_count: int | None = None
+    warning: str | None = None
+
+
+class TimelineStep(BaseModel):
+    key: str
+    label: str
+    status: str
+    warning: str | None = None
+```
+
+**Step 4: Store diagnostics in repository**
+
+Modify `apps/api/app/services/repository.py`:
+
+```python
+from app.schemas.export import ExportArtifact
+from app.schemas.job import JobRead, ModelCallRead, QualityReport, TimelineStep
+from app.schemas.review_issue import ReviewIssueRead
+
+
+class InMemoryRepository:
+    def __init__(self):
+        self.jobs: dict[str, JobRead] = {}
+        self.documents: dict[str, dict] = {}
+        self.quality_reports: dict[str, QualityReport] = {}
+        self.model_calls: dict[str, list[ModelCallRead]] = {}
+        self.timelines: dict[str, list[TimelineStep]] = {}
+        self.exports: dict[str, ExportArtifact] = {}
+        self.review_issues: dict[str, ReviewIssueRead] = {}
+
+    # keep existing methods
+
+    def set_model_calls(self, job_id: str, calls: list[ModelCallRead]) -> None:
+        self.model_calls[job_id] = calls
+
+    def list_model_calls(self, job_id: str) -> list[ModelCallRead]:
+        return self.model_calls.get(job_id, [])
+
+    def set_timeline(self, job_id: str, steps: list[TimelineStep]) -> None:
+        self.timelines[job_id] = steps
+
+    def get_timeline(self, job_id: str) -> list[TimelineStep]:
+        return self.timelines.get(job_id, [])
+```
+
+Preserve all existing repository methods from Task 5.
+
+**Step 5: Add mock diagnostics**
+
+Modify `apps/api/app/services/mock_pipeline.py` so `PipelineResult` includes model calls and timeline:
+
+```python
+from app.schemas.job import JobMode, ModelCallRead, QualityItem, QualityPolicy, QualityReport, TimelineStep
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    document: ProblemDocument
+    quality_report: QualityReport
+    model_calls: list[ModelCallRead]
+    timeline: list[TimelineStep]
+```
+
+Inside `run()`, return:
+
+```python
+model_calls = [
+    ModelCallRead(
+        model_call_id=f"call_{job_id}_vision",
+        role="vision_ocr",
+        model="mock-vision",
+        prompt_version="v1.0.0",
+        input_assets=[source_path],
+        status="success",
+        latency_seconds=0.2,
+        token_count=1204,
+    ),
+    ModelCallRead(
+        model_call_id=f"call_{job_id}_structure",
+        role="structure",
+        model="mock-structure",
+        prompt_version="v1.0.0",
+        input_assets=["ocr_result.json"],
+        status="success",
+        latency_seconds=0.1,
+        token_count=842,
+    ),
+    ModelCallRead(
+        model_call_id=f"call_{job_id}_quality",
+        role="figure_quality",
+        model="mock-quality",
+        prompt_version="v1.0.0",
+        input_assets=[f"{figure_id}_original"],
+        status="warning",
+        latency_seconds=0.1,
+        token_count=312,
+        warning="Mock figure quality is medium; review recommended.",
+    ),
+]
+timeline = [
+    TimelineStep(key="upload", label="Upload", status="completed"),
+    TimelineStep(key="preprocess", label="Preprocess", status="completed"),
+    TimelineStep(key="layout", label="Layout", status="completed"),
+    TimelineStep(key="crop_figures", label="Crop Figures", status="completed"),
+    TimelineStep(key="ocr", label="OCR", status="completed"),
+    TimelineStep(key="structure", label="Structure", status="completed"),
+    TimelineStep(key="validate", label="Validate", status="completed"),
+    TimelineStep(key="quality", label="Quality", status="warning", warning="Medium figure confidence"),
+    TimelineStep(key="export", label="Export", status="completed"),
+]
+return PipelineResult(
+    document=document,
+    quality_report=report,
+    model_calls=model_calls,
+    timeline=timeline,
+)
+```
+
+**Step 6: Persist diagnostics during job creation**
+
+Modify `apps/api/app/api/jobs.py` after setting the quality report:
+
+```python
+repo.set_model_calls(job_id, result.model_calls)
+repo.set_timeline(job_id, result.timeline)
+```
+
+Add endpoints:
+
+```python
+@router.get("/{job_id}/assets")
+def list_assets(job_id: str) -> list[dict]:
+    document = repo.get_document(job_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document not found")
+    return document.get("assets", [])
+
+
+@router.get("/{job_id}/quality-report")
+def get_quality_report(job_id: str):
+    report = repo.get_quality_report(job_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="quality report not found")
+    return report
+
+
+@router.get("/{job_id}/model-calls")
+def list_model_calls(job_id: str):
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return repo.list_model_calls(job_id)
+
+
+@router.get("/{job_id}/timeline")
+def get_timeline(job_id: str):
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return repo.get_timeline(job_id)
+```
+
+**Step 7: Run console support API tests**
+
+Run:
+
+```bash
+cd apps/api
+python -m pytest tests/test_console_support_api.py tests/test_jobs_api.py tests/test_mock_pipeline.py -v
+```
+
+Expected: PASS.
+
+**Step 8: Commit**
+
+```bash
+git add apps/api/app/schemas/job.py apps/api/app/services/mock_pipeline.py apps/api/app/services/repository.py apps/api/app/api/jobs.py apps/api/tests/test_console_support_api.py
+git commit -m "feat(api): add job console diagnostics"
+```
+
+---
+
+### Task 12: Backend Full Test Pass and API Documentation Update
 
 **Files:**
 - Modify: `README.md`
@@ -1874,7 +2202,7 @@ git commit -m "docs: document MVP API flow"
 
 ---
 
-### Task 12: Frontend Project Skeleton
+### Task 13: Console Frontend Project Skeleton
 
 **Files:**
 - Create: `apps/web/package.json`
@@ -1883,6 +2211,13 @@ git commit -m "docs: document MVP API flow"
 - Create: `apps/web/app/layout.tsx`
 - Create: `apps/web/app/page.tsx`
 - Create: `apps/web/lib/api.ts`
+- Create: `apps/web/lib/mock-data.ts`
+- Create: `apps/web/components/layout/app-shell.tsx`
+- Create: `apps/web/components/console/pipeline-stepper.tsx`
+- Create: `apps/web/components/console/source-image-panel.tsx`
+- Create: `apps/web/components/console/structured-preview.tsx`
+- Create: `apps/web/components/console/diagnostics-panel.tsx`
+- Create: `apps/web/components/console/quality-sidebar.tsx`
 - Create: `apps/web/README.md`
 
 **Step 1: Create package manifest**
@@ -1900,6 +2235,7 @@ Create `apps/web/package.json`:
     "lint": "next lint"
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
     "@tanstack/react-query": "^5.59.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
@@ -1950,7 +2286,7 @@ Create `apps/web/tsconfig.json`:
 }
 ```
 
-**Step 2: Implement first page**
+**Step 2: Implement console shell and CSS**
 
 Create `apps/web/app/layout.tsx`:
 
@@ -1976,31 +2312,416 @@ Create `apps/web/app/styles.css`:
 ```css
 :root {
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --surface-subtle: #f9fbfd;
+  --line: #dfe6ef;
+  --line-strong: #c8d3e0;
+  --text: #172033;
+  --muted: #65738a;
+  --brand: #00a878;
+  --brand-soft: #e7f8f2;
+  --blue: #2f80ed;
+  --purple: #8b5cf6;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --green: #12b76a;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
   margin: 0;
-  background: #f7f8fb;
-  color: #18202f;
+  background: var(--bg);
+  color: var(--text);
 }
 
-main {
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app-shell {
   min-height: 100vh;
-  padding: 24px;
+  display: grid;
+  grid-template-rows: 64px 1fr 34px;
+}
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 760;
+}
+
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: conic-gradient(from 30deg, #20c997, #12b76a, #7dd3fc, #20c997);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.nav-link {
+  color: var(--text);
+  text-decoration: none;
+  padding: 22px 0 18px;
+  border-bottom: 3px solid transparent;
+}
+
+.nav-link.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+.nav-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chip.success {
+  color: #067647;
+  background: #ecfdf3;
+  border-color: #abefc6;
+}
+
+.chip.warning {
+  color: #b54708;
+  background: #fffaeb;
+  border-color: #fedf89;
+}
+
+.job-page {
+  padding: 18px 28px 0;
+  display: grid;
+  gap: 14px;
+}
+
+.job-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.job-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.job-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.icon-button,
+.action-button {
+  height: 36px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.action-button.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
+
+.pipeline-card,
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(17, 31, 52, 0.05);
+}
+
+.pipeline-card {
+  width: min(760px, 100%);
+  justify-self: center;
+  padding: 18px 22px;
+}
+
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(58px, 1fr));
+  align-items: center;
+}
+
+.step {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.step::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: -50%;
+  right: 50%;
+  height: 2px;
+  background: var(--green);
+}
+
+.step:first-child::before {
+  display: none;
+}
+
+.step-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--green);
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 10px;
+  z-index: 1;
+}
+
+.step.warning .step-dot {
+  background: var(--amber);
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 360px;
-  gap: 16px;
+  grid-template-columns: minmax(330px, 0.92fr) minmax(420px, 1.05fr) minmax(380px, 0.94fr);
+  gap: 12px;
+  align-items: start;
 }
 
 .panel {
-  background: #ffffff;
-  border: 1px solid #dfe4ee;
-  border-radius: 8px;
   padding: 16px;
+  min-width: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.panel-title h2,
+.panel-title h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.image-stage {
+  position: relative;
+  height: 390px;
+  background: #f3f6fa;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.mock-page {
+  position: absolute;
+  inset: 52px 28px 10px;
+  background: white;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px #e6edf5;
+}
+
+.bbox {
+  position: absolute;
+  border: 2px solid var(--blue);
+  border-radius: 4px;
+  background: rgba(47, 128, 237, 0.04);
+}
+
+.bbox.figure {
+  border-color: var(--purple);
+}
+
+.bbox.options {
+  border-color: var(--green);
+  background: rgba(18, 183, 106, 0.06);
+}
+
+.legend,
+.crop-grid,
+.summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.crop-card {
+  width: 108px;
+  height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px;
+  display: grid;
+  align-content: space-between;
+  background: var(--surface);
+}
+
+.crop-card.selected {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+
+.preview-tabs,
+.diagnostic-tabs {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+  margin: -16px -16px 16px;
+  padding: 0 16px;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  padding: 14px 0 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+.problem-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.problem-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.text-block,
+.figure-block,
+.options-block {
+  border: 1px solid #cfe3ff;
+  border-radius: 7px;
+  padding: 12px;
+  margin: 10px 0;
+  background: #f8fbff;
+}
+
+.figure-block {
+  border-color: #d9c8ff;
+  background: #fcfaff;
+}
+
+.options-block {
+  border-color: #b7ebc6;
+  background: #f4fdf7;
+}
+
+.option-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(18, 183, 106, 0.07);
+  margin: 7px 0;
+}
+
+.timeline-call {
+  display: grid;
+  grid-template-columns: 72px 28px 1fr auto;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.quality-card {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.donut {
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  background: conic-gradient(var(--blue) 0 55%, var(--amber) 55% 82%, var(--red) 82% 94%, var(--purple) 94% 100%);
+  display: grid;
+  place-items: center;
+}
+
+.donut-inner {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  font-weight: 760;
+}
+
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 28px;
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.footer-status .right {
+  margin-left: auto;
+  display: flex;
+  gap: 20px;
 }
 
 pre {
@@ -2009,34 +2730,459 @@ pre {
 }
 ```
 
+Create `apps/web/components/layout/app-shell.tsx`:
+
+```tsx
+import { Bell, ChevronDown, Code2 } from "lucide-react";
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const links = ["Dashboard", "Jobs", "Create Job", "Issues", "Exports", "Models", "Settings"];
+  return (
+    <div className="app-shell">
+      <header className="top-nav">
+        <div className="brand">
+          <span className="brand-mark" />
+          <span>OCR Exercise Console</span>
+        </div>
+        <nav className="nav-links">
+          {links.map((link) => (
+            <a key={link} className={`nav-link ${link === "Jobs" ? "active" : ""}`} href="#">
+              {link}
+            </a>
+          ))}
+        </nav>
+        <div className="nav-actions">
+          <span className="chip">
+            <Code2 size={14} />
+            Debug Mode
+            <ChevronDown size={14} />
+          </span>
+          <span className="chip success">Models: 4/4 Ready</span>
+          <button className="icon-button" aria-label="Notifications">
+            <Bell size={16} />
+          </button>
+        </div>
+      </header>
+      {children}
+      <footer className="footer-status">
+        <span>Schema Version: 1.0.0</span>
+        <span>Document Version: 1</span>
+        <span>Renderer: markdown v0.3.0, html v0.2.1</span>
+        <span className="right">
+          <span>Storage: Local</span>
+          <span>API: Connected</span>
+        </span>
+      </footer>
+    </div>
+  );
+}
+```
+
 Create `apps/web/lib/api.ts`:
 
 ```ts
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000/api";
+
+export type Job = {
+  job_id: string;
+  mode: string;
+  quality_policy: string;
+  status: string;
+  progress: number;
+  latest_document_version?: number;
+  quality_summary: Record<string, unknown>;
+};
+
+export type TimelineStep = {
+  key: string;
+  label: string;
+  status: string;
+  warning?: string | null;
+};
+
+export type ModelCall = {
+  model_call_id: string;
+  role: string;
+  model: string;
+  prompt_version: string;
+  input_assets: string[];
+  status: string;
+  latency_seconds?: number | null;
+  token_count?: number | null;
+  warning?: string | null;
+};
+```
+
+Create `apps/web/lib/mock-data.ts`:
+
+```ts
+export const mockTimeline = [
+  { key: "upload", label: "Upload", status: "completed" },
+  { key: "preprocess", label: "Preprocess", status: "completed" },
+  { key: "layout", label: "Layout", status: "completed" },
+  { key: "crop_figures", label: "Crop Figures", status: "completed" },
+  { key: "ocr", label: "OCR", status: "completed" },
+  { key: "structure", label: "Structure", status: "completed" },
+  { key: "validate", label: "Validate", status: "completed" },
+  { key: "quality", label: "Quality", status: "warning" },
+  { key: "export", label: "Export", status: "completed" },
+];
+
+export const mockModelCalls = [
+  {
+    model_call_id: "call_1",
+    role: "vision_ocr",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.2.0",
+    input_assets: ["image_preprocessed_v1.png"],
+    status: "success",
+    latency_seconds: 2.4,
+    token_count: 1204,
+  },
+  {
+    model_call_id: "call_2",
+    role: "structure",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.3.0",
+    input_assets: ["ocr_result_v1.json"],
+    status: "success",
+    latency_seconds: 1.1,
+    token_count: 2842,
+  },
+  {
+    model_call_id: "call_3",
+    role: "figure_quality",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.1.0",
+    input_assets: ["fig_1_crop.png", "fig_2_crop.png"],
+    status: "warning",
+    latency_seconds: 0.8,
+    token_count: 812,
+    warning: "图像 fig_3 清晰度较低，建议增强",
+  },
+];
+```
+
+Create `apps/web/components/console/pipeline-stepper.tsx`:
+
+```tsx
+import { AlertTriangle, Check } from "lucide-react";
+
+import { mockTimeline } from "@/lib/mock-data";
+import type { TimelineStep } from "@/lib/api";
+
+export function PipelineStepper({ steps = mockTimeline }: { steps?: TimelineStep[] }) {
+  const displaySteps = steps.length ? steps : mockTimeline;
+  return (
+    <section className="pipeline-card" aria-label="OCR pipeline progress">
+      <div className="pipeline">
+        {displaySteps.map((step) => (
+          <div key={step.key} className={`step ${step.status}`}>
+            <span className="step-dot">
+              {step.status === "warning" ? <AlertTriangle size={11} /> : <Check size={11} />}
+            </span>
+            <span>{step.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+```
+
+Create `apps/web/components/console/source-image-panel.tsx`:
+
+```tsx
+import { Maximize2, Plus, RefreshCw, Search, Settings, SunMedium } from "lucide-react";
+
+type SourceImagePanelProps = {
+  assets?: unknown[];
+};
+
+export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
+  const crops = assets.length
+    ? assets.map((asset, index) => ({
+        id: typeof asset === "object" && asset && "figure_id" in asset ? String(asset.figure_id) : `fig_${index + 1}`,
+        score: index === 0 ? "0.82" : index === 1 ? "0.91" : "0.65",
+      }))
+    : [
+        { id: "fig_1", score: "0.82" },
+        { id: "fig_2", score: "0.91" },
+        { id: "fig_3", score: "0.65" },
+      ];
+
+  return (
+    <aside>
+      <section className="panel">
+        <div className="panel-title">
+          <h2>Source Image</h2>
+          <button className="icon-button" aria-label="Refresh source image">
+            <RefreshCw size={15} />
+          </button>
+        </div>
+        <div className="image-stage">
+          <div style={{ display: "flex", gap: 8, padding: 10 }}>
+            {[Search, Search, Search, Maximize2, SunMedium].map((Icon, index) => (
+              <button key={index} className="icon-button" aria-label={`Image tool ${index + 1}`}>
+                <Icon size={14} />
+              </button>
+            ))}
+          </div>
+          <div className="mock-page">
+            <div className="bbox" style={{ left: "6%", top: "8%", width: "88%", height: "20%" }} />
+            <div className="bbox figure" style={{ left: "8%", top: "31%", width: "84%", height: "40%" }} />
+            <div className="bbox options" style={{ left: "8%", top: "76%", width: "84%", height: "17%" }} />
+          </div>
+        </div>
+        <div className="legend" style={{ marginTop: 12 }}>
+          {["Text", "Formula", "Figure", "Low Conf.", "Unknown"].map((item) => (
+            <span key={item} className="chip">{item}</span>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" style={{ marginTop: 12 }}>
+        <div className="panel-title">
+          <h2>Figure Crops</h2>
+          <button className="icon-button" aria-label="Figure crop settings">
+            <Settings size={15} />
+          </button>
+        </div>
+        <div className="crop-grid">
+          {crops.map((crop, index) => (
+            <div key={crop.id} className={`crop-card ${index === 0 ? "selected" : ""}`}>
+              <div style={{ fontSize: 24 }}>{index === 0 ? "∠" : "√"}</div>
+              <strong>{crop.id}</strong>
+              <span style={{ color: index === 2 ? "var(--amber)" : "var(--brand)" }}>{crop.score}</span>
+            </div>
+          ))}
+          <button className="crop-card" aria-label="Create new crop">
+            <Plus size={18} />
+            <span>New Crop</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="panel" style={{ marginTop: 12 }}>
+        <div className="panel-title">
+          <h2>Image Info</h2>
+        </div>
+        <div className="summary-grid">
+          <span>File Name: question_001.png</span>
+          <span>Size: 2480 x 3508</span>
+          <span>Format: PNG</span>
+          <span>File Size: 2.34 MB</span>
+        </div>
+      </section>
+    </aside>
+  );
+}
+```
+
+Create `apps/web/components/console/structured-preview.tsx`:
+
+```tsx
+import { ChevronRight, Maximize2 } from "lucide-react";
+
+type StructuredPreviewProps = {
+  document?: unknown;
+};
+
+export function StructuredPreview({ document }: StructuredPreviewProps) {
+  return (
+    <section className="panel">
+      <div className="preview-tabs">
+        <button className="tab active">Structured Preview</button>
+        <button className="tab">Edit</button>
+        <button className="icon-button" style={{ marginLeft: "auto" }} aria-label="Fullscreen preview">
+          <Maximize2 size={14} />
+        </button>
+      </div>
+
+      <article className="problem-card">
+        <div className="problem-heading">
+          <strong>Problem 1</strong>
+          <span className="chip warning">Confidence: 0.86</span>
+        </div>
+        <div className="text-block">
+          如图所示，物体从斜面上的 A 点由静止滑下，经过 B 点后水平飞出（不计空气阻力）。
+        </div>
+        <div className="figure-block">
+          <div className="panel-title">
+            <strong>Figure: fig_1</strong>
+            <span style={{ color: "var(--brand)" }}>0.82</span>
+          </div>
+          <div style={{ height: 130, display: "grid", placeItems: "center", fontSize: 36 }}>h θ B →</div>
+        </div>
+        <div className="options-block">
+          {["√(2h/g)", "√(2h/g) tan θ", "√(2h/g) cot θ", "2√(h/g)"].map((option, index) => (
+            <div key={option} className="option-row">
+              <span>{String.fromCharCode(65 + index)}</span>
+              <span>{option}</span>
+            </div>
+          ))}
+        </div>
+        <button className="action-button" style={{ width: "100%", justifyContent: "space-between" }}>
+          Answer & Explanation <ChevronRight size={15} />
+        </button>
+      </article>
+
+      <article className="problem-card">
+        <div className="problem-heading">
+          <strong>Problem 2</strong>
+          <span className="chip warning">Low confidence</span>
+        </div>
+        <div className="text-block">
+          如图，电路中电源电动势为 E，内阻为 r，定值电阻为 R。
+        </div>
+      </article>
+
+      {document ? <pre>{JSON.stringify(document, null, 2)}</pre> : null}
+    </section>
+  );
+}
+```
+
+Create `apps/web/components/console/diagnostics-panel.tsx`:
+
+```tsx
+import { Box, Eye, ImageIcon } from "lucide-react";
+
+import { mockModelCalls } from "@/lib/mock-data";
+import type { ModelCall } from "@/lib/api";
+
+type DiagnosticsPanelProps = {
+  document?: unknown;
+  modelCalls?: ModelCall[] | unknown[];
+};
+
+export function DiagnosticsPanel({ document, modelCalls = mockModelCalls }: DiagnosticsPanelProps) {
+  const calls = modelCalls.length ? modelCalls : mockModelCalls;
+  return (
+    <section className="panel">
+      <div className="diagnostic-tabs">
+        {["JSON", "Model Calls", "Exports", "Quality Report", "Issues", "Assets"].map((tab) => (
+          <button key={tab} className={`tab ${tab === "Model Calls" ? "active" : ""}`}>
+            {tab}
+          </button>
+        ))}
+      </div>
+      {calls.map((call, index) => {
+        const typed = call as ModelCall;
+        const Icon = index === 0 ? Eye : index === 1 ? Box : ImageIcon;
+        return (
+          <div key={typed.model_call_id ?? index} className="timeline-call">
+            <span>10:21:{String(index * 3 + 4).padStart(2, "0")}</span>
+            <Icon size={18} />
+            <div>
+              <strong>{typed.role}</strong>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                {typed.model} · Prompt {typed.prompt_version}
+              </div>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                Input: {(typed.input_assets ?? []).join(", ")}
+              </div>
+              {typed.warning ? <div className="chip warning">{typed.warning}</div> : null}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <span className={`chip ${typed.status === "success" ? "success" : "warning"}`}>{typed.status}</span>
+              <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
+                {typed.latency_seconds}s · {typed.token_count} tokens
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {document ? <pre>{JSON.stringify(document, null, 2)}</pre> : null}
+    </section>
+  );
+}
+```
+
+Create `apps/web/components/console/quality-sidebar.tsx`:
+
+```tsx
+import { AlertTriangle } from "lucide-react";
+
+type QualitySidebarProps = {
+  qualityReport?: unknown;
+};
+
+export function QualitySidebar({ qualityReport }: QualitySidebarProps) {
+  return (
+    <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+      <section className="panel quality-card">
+        <div className="donut">
+          <div className="donut-inner">9</div>
+        </div>
+        <div>
+          <h3>Quality Summary</h3>
+          <p>Info 5 · Warning 3 · Error 1 · Critical 0</p>
+        </div>
+      </section>
+      <section className="panel">
+        <h3>Risk Level</h3>
+        <p className="chip warning">
+          <AlertTriangle size={15} />
+          Warning
+        </p>
+        <p>存在 3 个中等风险问题</p>
+      </section>
+      <section className="panel">
+        <h3>Top Issues</h3>
+        <p>fig_3 图像清晰度较低</p>
+        <p>公式区域置信度较低 (Problem 2)</p>
+        <p>选项 C 可能存在 OCR 错误</p>
+        {qualityReport ? <pre>{JSON.stringify(qualityReport, null, 2)}</pre> : null}
+      </section>
+    </div>
+  );
+}
 ```
 
 Create `apps/web/app/page.tsx`:
 
 ```tsx
+import { Download, RotateCcw, Share2 } from "lucide-react";
+
+import { PipelineStepper } from "@/components/console/pipeline-stepper";
+import { SourceImagePanel } from "@/components/console/source-image-panel";
+import { StructuredPreview } from "@/components/console/structured-preview";
+import { DiagnosticsPanel } from "@/components/console/diagnostics-panel";
+import { QualitySidebar } from "@/components/console/quality-sidebar";
+import { AppShell } from "@/components/layout/app-shell";
+
 export default function HomePage() {
   return (
-    <main>
-      <h1>easy-OCR Debug Console</h1>
-      <section className="workspace">
-        <aside className="panel">
-          <h2>Upload</h2>
-          <input type="file" accept="image/*" />
-        </aside>
-        <section className="panel">
-          <h2>Document Preview</h2>
-          <p>No job loaded.</p>
+    <AppShell>
+      <main className="job-page">
+        <section className="job-header">
+          <div>
+            <a href="#" className="nav-link">Back to Jobs</a>
+            <h1>Job #20240520-0001 <span className="chip success">Completed</span></h1>
+            <div className="job-meta">
+              <span>Created: 2024-05-20 10:21:03</span>
+              <span>Mode: debug</span>
+              <span>Policy: report_only</span>
+            </div>
+          </div>
+          <div className="job-actions">
+            <button className="action-button"><RotateCcw size={15} />Re-run</button>
+            <button className="action-button"><Share2 size={15} />Share</button>
+            <button className="action-button primary"><Download size={15} />Export</button>
+          </div>
         </section>
-        <aside className="panel">
-          <h2>JSON and Issues</h2>
-          <pre>{JSON.stringify({ status: "idle" }, null, 2)}</pre>
-        </aside>
-      </section>
-    </main>
+        <PipelineStepper />
+        <section className="workspace">
+          <SourceImagePanel />
+          <StructuredPreview />
+          <div>
+            <DiagnosticsPanel />
+            <QualitySidebar />
+          </div>
+        </section>
+      </main>
+    </AppShell>
   );
 }
 ```
@@ -2078,11 +3224,15 @@ If npm creates `apps/web/package-lock.json` instead of root `package-lock.json`,
 
 ---
 
-### Task 13: Frontend Upload Flow
+### Task 14: Connect Console to Job APIs
 
 **Files:**
 - Modify: `apps/web/app/page.tsx`
 - Modify: `apps/web/lib/api.ts`
+- Modify: `apps/web/components/console/pipeline-stepper.tsx`
+- Modify: `apps/web/components/console/structured-preview.tsx`
+- Modify: `apps/web/components/console/diagnostics-panel.tsx`
+- Modify: `apps/web/components/console/source-image-panel.tsx`
 
 **Step 1: Add API client functions**
 
@@ -2100,6 +3250,38 @@ export type Job = {
   latest_document_version?: number;
   quality_summary: Record<string, unknown>;
 };
+
+export async function listTimeline(jobId: string): Promise<TimelineStep[]> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/timeline`);
+  if (!response.ok) {
+    throw new Error(`Failed to load timeline: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function listModelCalls(jobId: string): Promise<ModelCall[]> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/model-calls`);
+  if (!response.ok) {
+    throw new Error(`Failed to load model calls: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function listAssets(jobId: string): Promise<unknown[]> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/assets`);
+  if (!response.ok) {
+    throw new Error(`Failed to load assets: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getQualityReport(jobId: string): Promise<unknown> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/quality-report`);
+  if (!response.ok) {
+    throw new Error(`Failed to load quality report: ${response.status}`);
+  }
+  return response.json();
+}
 
 export async function createJob(file: File): Promise<Job> {
   const form = new FormData();
@@ -2126,7 +3308,7 @@ export async function getDocument(jobId: string): Promise<unknown> {
 }
 ```
 
-**Step 2: Wire upload in page**
+**Step 2: Wire upload into the console without destroying the mockup layout**
 
 Modify `apps/web/app/page.tsx`:
 
@@ -2134,11 +3316,31 @@ Modify `apps/web/app/page.tsx`:
 "use client";
 
 import { useState } from "react";
-import { createJob, getDocument, type Job } from "@/lib/api";
+import { Download, RotateCcw, Share2 } from "lucide-react";
+
+import { PipelineStepper } from "@/components/console/pipeline-stepper";
+import { SourceImagePanel } from "@/components/console/source-image-panel";
+import { StructuredPreview } from "@/components/console/structured-preview";
+import { DiagnosticsPanel } from "@/components/console/diagnostics-panel";
+import { QualitySidebar } from "@/components/console/quality-sidebar";
+import { AppShell } from "@/components/layout/app-shell";
+import {
+  createJob,
+  getDocument,
+  getQualityReport,
+  listAssets,
+  listModelCalls,
+  listTimeline,
+  type Job,
+} from "@/lib/api";
 
 export default function HomePage() {
   const [job, setJob] = useState<Job | null>(null);
   const [document, setDocument] = useState<unknown>(null);
+  const [timeline, setTimeline] = useState<unknown[]>([]);
+  const [modelCalls, setModelCalls] = useState<unknown[]>([]);
+  const [assets, setAssets] = useState<unknown[]>([]);
+  const [qualityReport, setQualityReport] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleFile(file: File | null) {
@@ -2146,40 +3348,65 @@ export default function HomePage() {
     setError(null);
     const created = await createJob(file);
     setJob(created);
-    setDocument(await getDocument(created.job_id));
+    const [loadedDocument, loadedTimeline, loadedModelCalls, loadedAssets, loadedQualityReport] =
+      await Promise.all([
+        getDocument(created.job_id),
+        listTimeline(created.job_id),
+        listModelCalls(created.job_id),
+        listAssets(created.job_id),
+        getQualityReport(created.job_id),
+      ]);
+    setDocument(loadedDocument);
+    setTimeline(loadedTimeline);
+    setModelCalls(loadedModelCalls);
+    setAssets(loadedAssets);
+    setQualityReport(loadedQualityReport);
   }
 
   return (
-    <main>
-      <h1>easy-OCR Debug Console</h1>
-      <section className="workspace">
-        <aside className="panel">
-          <h2>Upload</h2>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(event) => {
-              handleFile(event.target.files?.[0] ?? null).catch((caught) => {
-                setError(caught instanceof Error ? caught.message : "Unknown upload error");
-              });
-            }}
-          />
-          {job ? <p>Status: {job.status}</p> : null}
-          {error ? <p role="alert">{error}</p> : null}
-        </aside>
-        <section className="panel">
-          <h2>Document Preview</h2>
-          {document ? <pre>{JSON.stringify(document, null, 2)}</pre> : <p>No job loaded.</p>}
+    <AppShell>
+      <main className="job-page">
+        <section className="job-header">
+          <div>
+            <a href="#" className="nav-link">Back to Jobs</a>
+            <h1>{job ? `Job ${job.job_id}` : "Job #20240520-0001"} <span className="chip success">{job?.status ?? "Completed"}</span></h1>
+            <div className="job-meta">
+              <span>Mode: {job?.mode ?? "debug"}</span>
+              <span>Policy: {job?.quality_policy ?? "report_only"}</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  handleFile(event.target.files?.[0] ?? null).catch((caught) => {
+                    setError(caught instanceof Error ? caught.message : "Unknown upload error");
+                  });
+                }}
+              />
+            </div>
+            {error ? <p role="alert">{error}</p> : null}
+          </div>
+          <div className="job-actions">
+            <button className="action-button"><RotateCcw size={15} />Re-run</button>
+            <button className="action-button"><Share2 size={15} />Share</button>
+            <button className="action-button primary"><Download size={15} />Export</button>
+          </div>
         </section>
-        <aside className="panel">
-          <h2>JSON and Issues</h2>
-          <pre>{JSON.stringify({ job }, null, 2)}</pre>
-        </aside>
-      </section>
-    </main>
+        <PipelineStepper steps={timeline} />
+        <section className="workspace">
+          <SourceImagePanel assets={assets} />
+          <StructuredPreview document={document} />
+          <div>
+            <DiagnosticsPanel document={document} modelCalls={modelCalls} />
+            <QualitySidebar qualityReport={qualityReport} />
+          </div>
+        </section>
+      </main>
+    </AppShell>
   );
 }
 ```
+
+Update the console components so they accept optional API data and fall back to `mock-data.ts` when data is empty. Do not remove the detailed visual structure from Task 13.
 
 **Step 3: Build frontend**
 
@@ -2201,7 +3428,73 @@ git commit -m "feat(web): add upload debug flow"
 
 ---
 
-### Task 14: Manual End-to-End Smoke Test
+### Task 15: Visual Verification with Browser
+
+**Files:**
+- Modify only if screenshot verification finds layout issues.
+
+**Step 1: Start backend**
+
+Run:
+
+```bash
+cd apps/api
+uvicorn app.main:app --reload
+```
+
+Expected: API starts on `http://127.0.0.1:8000`.
+
+**Step 2: Start frontend**
+
+Run:
+
+```bash
+cd apps/web
+NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000/api npm run dev
+```
+
+Expected: web app starts on `http://127.0.0.1:3000`.
+
+**Step 3: Use @browser to inspect the page**
+
+Use the Browser plugin or Playwright to open:
+
+```text
+http://127.0.0.1:3000
+```
+
+Verify against the supplied mockup:
+
+- Top navigation contains all seven sections.
+- Debug mode and model readiness chips are visible.
+- Job header, progress stepper, source image panel, structured preview, diagnostics tabs, quality summary, risk level, and top issues are visible.
+- No text overlaps inside buttons, chips, cards, tabs, or panels.
+- Three-column layout fits a desktop viewport around 1440px wide.
+- At 1024px wide, columns remain usable or stack without clipped text.
+
+**Step 4: Fix visual defects**
+
+If defects appear, modify only the affected frontend files and rebuild:
+
+```bash
+cd apps/web
+npm run build
+```
+
+Expected: build succeeds and visual defects are resolved.
+
+**Step 5: Commit visual fixes**
+
+```bash
+git add apps/web
+git commit -m "fix(web): polish OCR console layout"
+```
+
+Skip this commit if no fixes were needed.
+
+---
+
+### Task 16: Manual End-to-End Smoke Test
 
 **Files:**
 - Modify: `README.md`
@@ -2235,6 +3528,8 @@ Open `http://127.0.0.1:3000`, upload any small PNG or JPG, and verify:
 - Job status becomes `completed`.
 - JSON preview shows `schema_version: "1.0"`.
 - Document contains at least one problem and one figure asset.
+- Timeline, assets, model calls, and quality report panels populate from the API.
+- The page still visually resembles the supplied OCR Exercise Console mockup after real API data loads.
 
 **Step 4: Test API export manually**
 
@@ -2280,7 +3575,7 @@ git commit -m "docs: add MVP smoke test"
 
 ---
 
-### Task 15: Final Verification and Push
+### Task 17: Final Verification and Push
 
 **Files:**
 - No new files expected unless fixes are needed.
