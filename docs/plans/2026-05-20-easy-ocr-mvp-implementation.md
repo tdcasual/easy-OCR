@@ -21,6 +21,10 @@
 - Every commit should leave tests passing for the area touched.
 - The frontend must follow the supplied console mockup: it is a dense engineering console, not a marketing page or a simple upload demo.
 - Use a refined operational-tool aesthetic: light surface, compact navigation, status chips, timeline diagnostics, strong scanning hierarchy, and stable pane dimensions.
+- The frontend must support Simplified Chinese and English from the first implementation pass.
+- The frontend must support light and dark themes from the first implementation pass.
+- Do not write a large hand-authored CSS theme. Use Tailwind CSS utilities, semantic Tailwind tokens, and a small `globals.css` containing only Tailwind directives and base document rules.
+- Do not hard-code display strings directly in UI components. Route visible copy through the i18n dictionary unless it is OCR sample content.
 
 ## Frontend Reference Requirements
 
@@ -69,6 +73,9 @@ Required visual behavior:
 - Model calls must show role, model name, prompt version, input asset, status, token count, latency, and warning/error messages.
 - Quality summary must show severity counts and risk level.
 - The layout must remain usable at desktop sizes first; mobile can collapse columns later, but text must not overlap.
+- The theme toggle must switch between light and dark mode without rebuilding the app.
+- The language toggle must switch between Chinese and English labels without changing OCR content.
+- Component styling must use Tailwind classes such as `bg-surface`, `text-foreground`, `border-border`, `text-muted`, and `bg-success-soft`, backed by `tailwind.config.ts`.
 
 ## Target Repository Shape
 
@@ -2207,11 +2214,19 @@ git commit -m "docs: document MVP API flow"
 **Files:**
 - Create: `apps/web/package.json`
 - Create: `apps/web/next.config.ts`
+- Create: `apps/web/postcss.config.mjs`
+- Create: `apps/web/tailwind.config.ts`
 - Create: `apps/web/tsconfig.json`
 - Create: `apps/web/app/layout.tsx`
 - Create: `apps/web/app/page.tsx`
+- Create: `apps/web/app/globals.css`
 - Create: `apps/web/lib/api.ts`
+- Create: `apps/web/lib/i18n.ts`
 - Create: `apps/web/lib/mock-data.ts`
+- Create: `apps/web/components/providers/theme-provider.tsx`
+- Create: `apps/web/components/providers/console-preferences-provider.tsx`
+- Create: `apps/web/components/layout/theme-toggle.tsx`
+- Create: `apps/web/components/layout/language-toggle.tsx`
 - Create: `apps/web/components/layout/app-shell.tsx`
 - Create: `apps/web/components/console/pipeline-stepper.tsx`
 - Create: `apps/web/components/console/source-image-panel.tsx`
@@ -2237,6 +2252,7 @@ Create `apps/web/package.json`:
   "dependencies": {
     "lucide-react": "^0.468.0",
     "@tanstack/react-query": "^5.59.0",
+    "next-themes": "^0.4.4",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -2245,6 +2261,9 @@ Create `apps/web/package.json`:
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
     "typescript": "^5.6.0"
   }
 }
@@ -2258,6 +2277,62 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {};
 
 export default nextConfig;
+```
+
+Create `apps/web/postcss.config.mjs`:
+
+```js
+const config = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+
+export default config;
+```
+
+Create `apps/web/tailwind.config.ts`:
+
+```ts
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: "class",
+  content: [
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    "./lib/**/*.{ts,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        surface: "hsl(var(--surface))",
+        "surface-subtle": "hsl(var(--surface-subtle))",
+        border: "hsl(var(--border))",
+        muted: "hsl(var(--muted))",
+        brand: "hsl(var(--brand))",
+        "brand-soft": "hsl(var(--brand-soft))",
+        success: "hsl(var(--success))",
+        "success-soft": "hsl(var(--success-soft))",
+        warning: "hsl(var(--warning))",
+        "warning-soft": "hsl(var(--warning-soft))",
+        danger: "hsl(var(--danger))",
+        "danger-soft": "hsl(var(--danger-soft))",
+        info: "hsl(var(--info))",
+        "info-soft": "hsl(var(--info-soft))",
+      },
+      boxShadow: {
+        panel: "0 10px 28px hsl(var(--shadow) / 0.08)",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
 ```
 
 Create `apps/web/tsconfig.json`:
@@ -2286,13 +2361,16 @@ Create `apps/web/tsconfig.json`:
 }
 ```
 
-**Step 2: Implement console shell and CSS**
+**Step 2: Implement Tailwind globals, theme provider, and i18n provider**
 
 Create `apps/web/app/layout.tsx`:
 
 ```tsx
 import type { Metadata } from "next";
-import "./styles.css";
+import "./globals.css";
+
+import { ConsolePreferencesProvider } from "@/components/providers/console-preferences-provider";
+import { ThemeProvider } from "@/components/providers/theme-provider";
 
 export const metadata: Metadata = {
   title: "easy-OCR Debug Console",
@@ -2300,475 +2378,327 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <ThemeProvider>
+          <ConsolePreferencesProvider>{children}</ConsolePreferencesProvider>
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
 ```
 
-Create `apps/web/app/styles.css`:
+Create `apps/web/app/globals.css`:
 
 ```css
-:root {
-  color-scheme: light;
-  --bg: #f6f8fb;
-  --surface: #ffffff;
-  --surface-subtle: #f9fbfd;
-  --line: #dfe6ef;
-  --line-strong: #c8d3e0;
-  --text: #172033;
-  --muted: #65738a;
-  --brand: #00a878;
-  --brand-soft: #e7f8f2;
-  --blue: #2f80ed;
-  --purple: #8b5cf6;
-  --amber: #f59e0b;
-  --red: #ef4444;
-  --green: #12b76a;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 216 33% 97%;
+    --foreground: 222 35% 15%;
+    --surface: 0 0% 100%;
+    --surface-subtle: 210 33% 98%;
+    --border: 214 30% 90%;
+    --muted: 216 15% 45%;
+    --brand: 162 100% 33%;
+    --brand-soft: 158 64% 94%;
+    --success: 150 84% 32%;
+    --success-soft: 145 81% 96%;
+    --warning: 35 92% 45%;
+    --warning-soft: 42 100% 96%;
+    --danger: 0 84% 60%;
+    --danger-soft: 0 86% 97%;
+    --info: 214 84% 56%;
+    --info-soft: 211 100% 97%;
+    --shadow: 215 40% 18%;
+  }
+
+  .dark {
+    --background: 222 32% 8%;
+    --foreground: 210 30% 94%;
+    --surface: 222 28% 12%;
+    --surface-subtle: 221 25% 16%;
+    --border: 220 20% 24%;
+    --muted: 216 13% 68%;
+    --brand: 162 78% 44%;
+    --brand-soft: 162 42% 18%;
+    --success: 150 70% 45%;
+    --success-soft: 150 42% 18%;
+    --warning: 38 92% 56%;
+    --warning-soft: 36 44% 18%;
+    --danger: 0 84% 66%;
+    --danger-soft: 0 45% 18%;
+    --info: 214 92% 66%;
+    --info-soft: 214 44% 18%;
+    --shadow: 222 45% 4%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+}
+```
+
+Create `apps/web/components/providers/theme-provider.tsx`:
+
+```tsx
+"use client";
+
+import { ThemeProvider as NextThemesProvider } from "next-themes";
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <NextThemesProvider attribute="class" defaultTheme="system" enableSystem>
+      {children}
+    </NextThemesProvider>
+  );
+}
+```
+
+Create `apps/web/lib/i18n.ts`:
+
+```ts
+export type Locale = "zh-CN" | "en";
+
+export const dictionaries = {
+  "zh-CN": {
+    appName: "OCR 题目控制台",
+    nav: {
+      dashboard: "仪表盘",
+      jobs: "任务",
+      createJob: "创建任务",
+      issues: "问题",
+      exports: "导出",
+      models: "模型",
+      settings: "设置",
+    },
+    actions: {
+      backToJobs: "返回任务",
+      rerun: "重新运行",
+      share: "分享",
+      export: "导出",
+      debugMode: "调试模式",
+      readyModels: "模型: 4/4 就绪",
+      theme: "主题",
+      language: "语言",
+    },
+    panels: {
+      sourceImage: "源图片",
+      figureCrops: "配图裁剪",
+      imageInfo: "图片信息",
+      structuredPreview: "结构化预览",
+      edit: "编辑",
+      qualitySummary: "质量摘要",
+      riskLevel: "风险等级",
+      topIssues: "主要问题",
+    },
+    diagnostics: {
+      json: "JSON",
+      modelCalls: "模型调用",
+      exports: "导出",
+      qualityReport: "质量报告",
+      issues: "问题",
+      assets: "资产",
+    },
+  },
+  en: {
+    appName: "OCR Exercise Console",
+    nav: {
+      dashboard: "Dashboard",
+      jobs: "Jobs",
+      createJob: "Create Job",
+      issues: "Issues",
+      exports: "Exports",
+      models: "Models",
+      settings: "Settings",
+    },
+    actions: {
+      backToJobs: "Back to Jobs",
+      rerun: "Re-run",
+      share: "Share",
+      export: "Export",
+      debugMode: "Debug Mode",
+      readyModels: "Models: 4/4 Ready",
+      theme: "Theme",
+      language: "Language",
+    },
+    panels: {
+      sourceImage: "Source Image",
+      figureCrops: "Figure Crops",
+      imageInfo: "Image Info",
+      structuredPreview: "Structured Preview",
+      edit: "Edit",
+      qualitySummary: "Quality Summary",
+      riskLevel: "Risk Level",
+      topIssues: "Top Issues",
+    },
+    diagnostics: {
+      json: "JSON",
+      modelCalls: "Model Calls",
+      exports: "Exports",
+      qualityReport: "Quality Report",
+      issues: "Issues",
+      assets: "Assets",
+    },
+  },
+} as const;
+```
+
+Create `apps/web/components/providers/console-preferences-provider.tsx`:
+
+```tsx
+"use client";
+
+import { createContext, useContext, useMemo, useState } from "react";
+
+import { dictionaries, type Locale } from "@/lib/i18n";
+
+type ConsolePreferences = {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  t: (typeof dictionaries)[Locale];
+};
+
+const ConsolePreferencesContext = createContext<ConsolePreferences | null>(null);
+
+export function ConsolePreferencesProvider({ children }: { children: React.ReactNode }) {
+  const [locale, setLocale] = useState<Locale>("zh-CN");
+  const value = useMemo(() => ({ locale, setLocale, t: dictionaries[locale] }), [locale]);
+  return (
+    <ConsolePreferencesContext.Provider value={value}>
+      {children}
+    </ConsolePreferencesContext.Provider>
+  );
 }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
+export function useConsolePreferences() {
+  const context = useContext(ConsolePreferencesContext);
+  if (!context) {
+    throw new Error("useConsolePreferences must be used inside ConsolePreferencesProvider");
+  }
+  return context;
 }
+```
 
-button,
-input,
-select {
-  font: inherit;
+Create `apps/web/components/layout/theme-toggle.tsx`:
+
+```tsx
+"use client";
+
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
+
+export function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-subtle"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+    >
+      {isDark ? <Sun size={15} /> : <Moon size={15} />}
+      {isDark ? "Light" : "Dark"}
+    </button>
+  );
 }
+```
 
-.app-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-rows: 64px 1fr 34px;
-}
+Create `apps/web/components/layout/language-toggle.tsx`:
 
-.top-nav {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 0 28px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}
+```tsx
+"use client";
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 760;
-}
+import { Languages } from "lucide-react";
 
-.brand-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-  background: conic-gradient(from 30deg, #20c997, #12b76a, #7dd3fc, #20c997);
-}
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
-.nav-links {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-
-.nav-link {
-  color: var(--text);
-  text-decoration: none;
-  padding: 22px 0 18px;
-  border-bottom: 3px solid transparent;
-}
-
-.nav-link.active {
-  color: var(--brand);
-  border-bottom-color: var(--brand);
-}
-
-.nav-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: var(--surface-subtle);
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.chip.success {
-  color: #067647;
-  background: #ecfdf3;
-  border-color: #abefc6;
-}
-
-.chip.warning {
-  color: #b54708;
-  background: #fffaeb;
-  border-color: #fedf89;
-}
-
-.job-page {
-  padding: 18px 28px 0;
-  display: grid;
-  gap: 14px;
-}
-
-.job-header {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.job-meta {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.job-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.icon-button,
-.action-button {
-  height: 36px;
-  border-radius: 7px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--text);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  cursor: pointer;
-}
-
-.action-button.primary {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: white;
-}
-
-.pipeline-card,
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(17, 31, 52, 0.05);
-}
-
-.pipeline-card {
-  width: min(760px, 100%);
-  justify-self: center;
-  padding: 18px 22px;
-}
-
-.pipeline {
-  display: grid;
-  grid-template-columns: repeat(9, minmax(58px, 1fr));
-  align-items: center;
-}
-
-.step {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.step::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  left: -50%;
-  right: 50%;
-  height: 2px;
-  background: var(--green);
-}
-
-.step:first-child::before {
-  display: none;
-}
-
-.step-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: var(--green);
-  display: grid;
-  place-items: center;
-  color: white;
-  font-size: 10px;
-  z-index: 1;
-}
-
-.step.warning .step-dot {
-  background: var(--amber);
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(330px, 0.92fr) minmax(420px, 1.05fr) minmax(380px, 0.94fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.panel {
-  padding: 16px;
-  min-width: 0;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.panel-title h2,
-.panel-title h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.image-stage {
-  position: relative;
-  height: 390px;
-  background: #f3f6fa;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.mock-page {
-  position: absolute;
-  inset: 52px 28px 10px;
-  background: white;
-  border-radius: 5px;
-  box-shadow: inset 0 0 0 1px #e6edf5;
-}
-
-.bbox {
-  position: absolute;
-  border: 2px solid var(--blue);
-  border-radius: 4px;
-  background: rgba(47, 128, 237, 0.04);
-}
-
-.bbox.figure {
-  border-color: var(--purple);
-}
-
-.bbox.options {
-  border-color: var(--green);
-  background: rgba(18, 183, 106, 0.06);
-}
-
-.legend,
-.crop-grid,
-.summary-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.crop-card {
-  width: 108px;
-  height: 96px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 8px;
-  display: grid;
-  align-content: space-between;
-  background: var(--surface);
-}
-
-.crop-card.selected {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 1px var(--brand);
-}
-
-.preview-tabs,
-.diagnostic-tabs {
-  display: flex;
-  gap: 20px;
-  border-bottom: 1px solid var(--line);
-  margin: -16px -16px 16px;
-  padding: 0 16px;
-}
-
-.tab {
-  border: 0;
-  background: transparent;
-  padding: 14px 0 11px;
-  color: var(--muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.tab.active {
-  color: var(--brand);
-  border-bottom-color: var(--brand);
-}
-
-.problem-card {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 14px;
-  margin-bottom: 16px;
-}
-
-.problem-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.text-block,
-.figure-block,
-.options-block {
-  border: 1px solid #cfe3ff;
-  border-radius: 7px;
-  padding: 12px;
-  margin: 10px 0;
-  background: #f8fbff;
-}
-
-.figure-block {
-  border-color: #d9c8ff;
-  background: #fcfaff;
-}
-
-.options-block {
-  border-color: #b7ebc6;
-  background: #f4fdf7;
-}
-
-.option-row {
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  gap: 10px;
-  padding: 7px 8px;
-  border-radius: 7px;
-  background: rgba(18, 183, 106, 0.07);
-  margin: 7px 0;
-}
-
-.timeline-call {
-  display: grid;
-  grid-template-columns: 72px 28px 1fr auto;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.quality-card {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 16px;
-  align-items: center;
-}
-
-.donut {
-  width: 92px;
-  height: 92px;
-  border-radius: 999px;
-  background: conic-gradient(var(--blue) 0 55%, var(--amber) 55% 82%, var(--red) 82% 94%, var(--purple) 94% 100%);
-  display: grid;
-  place-items: center;
-}
-
-.donut-inner {
-  width: 58px;
-  height: 58px;
-  border-radius: 999px;
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  font-weight: 760;
-}
-
-.footer-status {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 0 28px;
-  color: var(--muted);
-  font-size: 12px;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-}
-
-.footer-status .right {
-  margin-left: auto;
-  display: flex;
-  gap: 20px;
-}
-
-pre {
-  overflow: auto;
-  white-space: pre-wrap;
+export function LanguageToggle() {
+  const { locale, setLocale, t } = useConsolePreferences();
+  return (
+    <button
+      type="button"
+      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-subtle"
+      onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}
+    >
+      <Languages size={15} />
+      {t.actions.language}: {locale === "zh-CN" ? "中文" : "EN"}
+    </button>
+  );
 }
 ```
 
 Create `apps/web/components/layout/app-shell.tsx`:
 
 ```tsx
-import { Bell, ChevronDown, Code2 } from "lucide-react";
+"use client";
+
+import { Bell, Code2 } from "lucide-react";
+
+import { LanguageToggle } from "@/components/layout/language-toggle";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const links = ["Dashboard", "Jobs", "Create Job", "Issues", "Exports", "Models", "Settings"];
+  const { t } = useConsolePreferences();
+  const links = [
+    t.nav.dashboard,
+    t.nav.jobs,
+    t.nav.createJob,
+    t.nav.issues,
+    t.nav.exports,
+    t.nav.models,
+    t.nav.settings,
+  ];
   return (
-    <div className="app-shell">
-      <header className="top-nav">
-        <div className="brand">
-          <span className="brand-mark" />
-          <span>OCR Exercise Console</span>
+    <div className="grid min-h-screen grid-rows-[64px_1fr_34px] bg-background text-foreground">
+      <header className="flex items-center gap-7 border-b border-border bg-surface px-7">
+        <div className="flex items-center gap-2.5 font-bold">
+          <span className="h-6 w-6 rounded-lg bg-brand" />
+          <span>{t.appName}</span>
         </div>
-        <nav className="nav-links">
+        <nav className="flex items-center gap-6">
           {links.map((link) => (
-            <a key={link} className={`nav-link ${link === "Jobs" ? "active" : ""}`} href="#">
+            <a
+              key={link}
+              className={`border-b-2 px-0 py-5 text-sm no-underline ${link === t.nav.jobs ? "border-brand text-brand" : "border-transparent text-foreground"}`}
+              href="#"
+            >
               {link}
             </a>
           ))}
         </nav>
-        <div className="nav-actions">
-          <span className="chip">
+        <div className="ml-auto flex items-center gap-3">
+          <span className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface-subtle px-3 text-sm text-muted">
             <Code2 size={14} />
-            Debug Mode
-            <ChevronDown size={14} />
+            {t.actions.debugMode}
           </span>
-          <span className="chip success">Models: 4/4 Ready</span>
-          <button className="icon-button" aria-label="Notifications">
+          <span className="inline-flex h-9 items-center rounded-md border border-success/30 bg-success-soft px-3 text-sm text-success">
+            {t.actions.readyModels}
+          </span>
+          <ThemeToggle />
+          <LanguageToggle />
+          <button className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Notifications">
             <Bell size={16} />
           </button>
         </div>
       </header>
       {children}
-      <footer className="footer-status">
+      <footer className="flex items-center gap-7 border-t border-border bg-surface px-7 text-xs text-muted">
         <span>Schema Version: 1.0.0</span>
         <span>Document Version: 1</span>
         <span>Renderer: markdown v0.3.0, html v0.2.1</span>
-        <span className="right">
+        <span className="ml-auto flex gap-5">
           <span>Storage: Local</span>
           <span>API: Connected</span>
         </span>
@@ -2868,20 +2798,20 @@ Create `apps/web/components/console/pipeline-stepper.tsx`:
 ```tsx
 import { AlertTriangle, Check } from "lucide-react";
 
-import { mockTimeline } from "@/lib/mock-data";
 import type { TimelineStep } from "@/lib/api";
+import { mockTimeline } from "@/lib/mock-data";
 
 export function PipelineStepper({ steps = mockTimeline }: { steps?: TimelineStep[] }) {
   const displaySteps = steps.length ? steps : mockTimeline;
   return (
-    <section className="pipeline-card" aria-label="OCR pipeline progress">
-      <div className="pipeline">
+    <section className="mx-auto w-full max-w-3xl rounded-lg border border-border bg-surface px-5 py-4 shadow-panel" aria-label="OCR pipeline progress">
+      <div className="grid grid-cols-9 items-center">
         {displaySteps.map((step) => (
-          <div key={step.key} className={`step ${step.status}`}>
-            <span className="step-dot">
+          <div key={step.key} className="relative grid justify-items-center gap-2 text-xs text-muted before:absolute before:left-[-50%] before:right-1/2 before:top-2 before:h-0.5 before:bg-success first:before:hidden">
+            <span className={`z-10 grid h-4 w-4 place-items-center rounded-full text-white ${step.status === "warning" ? "bg-warning" : "bg-success"}`}>
               {step.status === "warning" ? <AlertTriangle size={11} /> : <Check size={11} />}
             </span>
-            <span>{step.label}</span>
+            <span className="truncate px-1">{step.label}</span>
           </div>
         ))}
       </div>
@@ -2893,13 +2823,18 @@ export function PipelineStepper({ steps = mockTimeline }: { steps?: TimelineStep
 Create `apps/web/components/console/source-image-panel.tsx`:
 
 ```tsx
+"use client";
+
 import { Maximize2, Plus, RefreshCw, Search, Settings, SunMedium } from "lucide-react";
+
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
 type SourceImagePanelProps = {
   assets?: unknown[];
 };
 
 export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
+  const { t } = useConsolePreferences();
   const crops = assets.length
     ? assets.map((asset, index) => ({
         id: typeof asset === "object" && asset && "figure_id" in asset ? String(asset.figure_id) : `fig_${index + 1}`,
@@ -2912,62 +2847,60 @@ export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
       ];
 
   return (
-    <aside>
-      <section className="panel">
-        <div className="panel-title">
-          <h2>Source Image</h2>
-          <button className="icon-button" aria-label="Refresh source image">
+    <aside className="grid gap-3">
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">{t.panels.sourceImage}</h2>
+          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Refresh source image">
             <RefreshCw size={15} />
           </button>
         </div>
-        <div className="image-stage">
-          <div style={{ display: "flex", gap: 8, padding: 10 }}>
+        <div className="relative h-96 overflow-hidden rounded-md border border-border bg-surface-subtle">
+          <div className="flex gap-2 p-2.5">
             {[Search, Search, Search, Maximize2, SunMedium].map((Icon, index) => (
-              <button key={index} className="icon-button" aria-label={`Image tool ${index + 1}`}>
+              <button key={index} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label={`Image tool ${index + 1}`}>
                 <Icon size={14} />
               </button>
             ))}
           </div>
-          <div className="mock-page">
-            <div className="bbox" style={{ left: "6%", top: "8%", width: "88%", height: "20%" }} />
-            <div className="bbox figure" style={{ left: "8%", top: "31%", width: "84%", height: "40%" }} />
-            <div className="bbox options" style={{ left: "8%", top: "76%", width: "84%", height: "17%" }} />
+          <div className="absolute inset-x-7 bottom-3 top-14 rounded-md bg-white shadow-inner dark:bg-surface">
+            <div className="absolute left-[6%] top-[8%] h-[20%] w-[88%] rounded border-2 border-info bg-info-soft/40" />
+            <div className="absolute left-[8%] top-[31%] h-[40%] w-[84%] rounded border-2 border-brand bg-brand-soft/30" />
+            <div className="absolute left-[8%] top-[76%] h-[17%] w-[84%] rounded border-2 border-success bg-success-soft/40" />
           </div>
         </div>
-        <div className="legend" style={{ marginTop: 12 }}>
+        <div className="mt-3 flex flex-wrap gap-2">
           {["Text", "Formula", "Figure", "Low Conf.", "Unknown"].map((item) => (
-            <span key={item} className="chip">{item}</span>
+            <span key={item} className="rounded-md border border-border bg-surface-subtle px-2 py-1 text-xs text-muted">{item}</span>
           ))}
         </div>
       </section>
 
-      <section className="panel" style={{ marginTop: 12 }}>
-        <div className="panel-title">
-          <h2>Figure Crops</h2>
-          <button className="icon-button" aria-label="Figure crop settings">
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">{t.panels.figureCrops}</h2>
+          <button className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Figure crop settings">
             <Settings size={15} />
           </button>
         </div>
-        <div className="crop-grid">
+        <div className="flex flex-wrap gap-2.5">
           {crops.map((crop, index) => (
-            <div key={crop.id} className={`crop-card ${index === 0 ? "selected" : ""}`}>
-              <div style={{ fontSize: 24 }}>{index === 0 ? "∠" : "√"}</div>
-              <strong>{crop.id}</strong>
-              <span style={{ color: index === 2 ? "var(--amber)" : "var(--brand)" }}>{crop.score}</span>
+            <div key={crop.id} className={`grid h-24 w-28 content-between rounded-md border bg-surface p-2 ${index === 0 ? "border-brand ring-1 ring-brand" : "border-border"}`}>
+              <div className="text-2xl">{index === 0 ? "∠" : "√"}</div>
+              <strong className="text-sm">{crop.id}</strong>
+              <span className={index === 2 ? "text-warning" : "text-brand"}>{crop.score}</span>
             </div>
           ))}
-          <button className="crop-card" aria-label="Create new crop">
+          <button className="grid h-24 w-28 place-items-center rounded-md border border-dashed border-border bg-surface text-sm text-muted hover:bg-surface-subtle" aria-label="Create new crop">
             <Plus size={18} />
             <span>New Crop</span>
           </button>
         </div>
       </section>
 
-      <section className="panel" style={{ marginTop: 12 }}>
-        <div className="panel-title">
-          <h2>Image Info</h2>
-        </div>
-        <div className="summary-grid">
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <h2 className="mb-3 text-sm font-semibold">{t.panels.imageInfo}</h2>
+        <div className="grid gap-2 text-sm text-muted">
           <span>File Name: question_001.png</span>
           <span>Size: 2480 x 3508</span>
           <span>Format: PNG</span>
@@ -2982,62 +2915,67 @@ export function SourceImagePanel({ assets = [] }: SourceImagePanelProps) {
 Create `apps/web/components/console/structured-preview.tsx`:
 
 ```tsx
+"use client";
+
 import { ChevronRight, Maximize2 } from "lucide-react";
+
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
 type StructuredPreviewProps = {
   document?: unknown;
 };
 
 export function StructuredPreview({ document }: StructuredPreviewProps) {
+  const { t } = useConsolePreferences();
   return (
-    <section className="panel">
-      <div className="preview-tabs">
-        <button className="tab active">Structured Preview</button>
-        <button className="tab">Edit</button>
-        <button className="icon-button" style={{ marginLeft: "auto" }} aria-label="Fullscreen preview">
+    <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+      <div className="-mx-4 -mt-4 mb-4 flex gap-5 border-b border-border px-4">
+        <button className="border-b-2 border-brand py-3 text-sm text-brand">{t.panels.structuredPreview}</button>
+        <button className="border-b-2 border-transparent py-3 text-sm text-muted">{t.panels.edit}</button>
+        <button className="ml-auto grid h-9 w-9 place-items-center rounded-md border border-border bg-surface hover:bg-surface-subtle" aria-label="Fullscreen preview">
           <Maximize2 size={14} />
         </button>
       </div>
 
-      <article className="problem-card">
-        <div className="problem-heading">
+      <article className="mb-4 rounded-lg border border-border p-3.5">
+        <div className="mb-3 flex items-center gap-2.5">
           <strong>Problem 1</strong>
-          <span className="chip warning">Confidence: 0.86</span>
+          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">Confidence: 0.86</span>
         </div>
-        <div className="text-block">
+        <div className="my-2 rounded-md border border-info/30 bg-info-soft p-3 text-sm leading-7">
           如图所示，物体从斜面上的 A 点由静止滑下，经过 B 点后水平飞出（不计空气阻力）。
         </div>
-        <div className="figure-block">
-          <div className="panel-title">
+        <div className="my-2 rounded-md border border-brand/30 bg-brand-soft/60 p-3">
+          <div className="mb-2 flex items-center justify-between">
             <strong>Figure: fig_1</strong>
-            <span style={{ color: "var(--brand)" }}>0.82</span>
+            <span className="text-brand">0.82</span>
           </div>
-          <div style={{ height: 130, display: "grid", placeItems: "center", fontSize: 36 }}>h θ B →</div>
+          <div className="grid h-32 place-items-center text-4xl">h θ B →</div>
         </div>
-        <div className="options-block">
+        <div className="my-2 rounded-md border border-success/30 bg-success-soft/60 p-3">
           {["√(2h/g)", "√(2h/g) tan θ", "√(2h/g) cot θ", "2√(h/g)"].map((option, index) => (
-            <div key={option} className="option-row">
+            <div key={option} className="my-1.5 grid grid-cols-[28px_1fr] gap-2 rounded-md bg-success-soft px-2 py-1.5">
               <span>{String.fromCharCode(65 + index)}</span>
               <span>{option}</span>
             </div>
           ))}
         </div>
-        <button className="action-button" style={{ width: "100%", justifyContent: "space-between" }}>
+        <button className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle">
           Answer & Explanation <ChevronRight size={15} />
         </button>
       </article>
 
-      <article className="problem-card">
-        <div className="problem-heading">
+      <article className="rounded-lg border border-border p-3.5">
+        <div className="mb-3 flex items-center gap-2.5">
           <strong>Problem 2</strong>
-          <span className="chip warning">Low confidence</span>
+          <span className="rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">Low confidence</span>
         </div>
-        <div className="text-block">
+        <div className="rounded-md border border-info/30 bg-info-soft p-3 text-sm leading-7">
           如图，电路中电源电动势为 E，内阻为 r，定值电阻为 R。
         </div>
       </article>
 
-      {document ? <pre>{JSON.stringify(document, null, 2)}</pre> : null}
+      {document ? <pre className="mt-4 overflow-auto whitespace-pre-wrap rounded-md bg-surface-subtle p-3 text-xs">{JSON.stringify(document, null, 2)}</pre> : null}
     </section>
   );
 }
@@ -3046,10 +2984,13 @@ export function StructuredPreview({ document }: StructuredPreviewProps) {
 Create `apps/web/components/console/diagnostics-panel.tsx`:
 
 ```tsx
+"use client";
+
 import { Box, Eye, ImageIcon } from "lucide-react";
 
-import { mockModelCalls } from "@/lib/mock-data";
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 import type { ModelCall } from "@/lib/api";
+import { mockModelCalls } from "@/lib/mock-data";
 
 type DiagnosticsPanelProps = {
   document?: unknown;
@@ -3057,12 +2998,21 @@ type DiagnosticsPanelProps = {
 };
 
 export function DiagnosticsPanel({ document, modelCalls = mockModelCalls }: DiagnosticsPanelProps) {
+  const { t } = useConsolePreferences();
   const calls = modelCalls.length ? modelCalls : mockModelCalls;
+  const tabs = [
+    t.diagnostics.json,
+    t.diagnostics.modelCalls,
+    t.diagnostics.exports,
+    t.diagnostics.qualityReport,
+    t.diagnostics.issues,
+    t.diagnostics.assets,
+  ];
   return (
-    <section className="panel">
-      <div className="diagnostic-tabs">
-        {["JSON", "Model Calls", "Exports", "Quality Report", "Issues", "Assets"].map((tab) => (
-          <button key={tab} className={`tab ${tab === "Model Calls" ? "active" : ""}`}>
+    <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+      <div className="-mx-4 -mt-4 mb-4 flex gap-5 overflow-x-auto border-b border-border px-4">
+        {tabs.map((tab) => (
+          <button key={tab} className={`whitespace-nowrap border-b-2 py-3 text-sm ${tab === t.diagnostics.modelCalls ? "border-brand text-brand" : "border-transparent text-muted"}`}>
             {tab}
           </button>
         ))}
@@ -3071,29 +3021,23 @@ export function DiagnosticsPanel({ document, modelCalls = mockModelCalls }: Diag
         const typed = call as ModelCall;
         const Icon = index === 0 ? Eye : index === 1 ? Box : ImageIcon;
         return (
-          <div key={typed.model_call_id ?? index} className="timeline-call">
-            <span>10:21:{String(index * 3 + 4).padStart(2, "0")}</span>
+          <div key={typed.model_call_id ?? index} className="grid grid-cols-[72px_28px_1fr_auto] gap-3 border-b border-border py-3 text-sm">
+            <span className="text-muted">10:21:{String(index * 3 + 4).padStart(2, "0")}</span>
             <Icon size={18} />
             <div>
               <strong>{typed.role}</strong>
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                {typed.model} · Prompt {typed.prompt_version}
-              </div>
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                Input: {(typed.input_assets ?? []).join(", ")}
-              </div>
-              {typed.warning ? <div className="chip warning">{typed.warning}</div> : null}
+              <div className="text-xs text-muted">{typed.model} · Prompt {typed.prompt_version}</div>
+              <div className="text-xs text-muted">Input: {(typed.input_assets ?? []).join(", ")}</div>
+              {typed.warning ? <div className="mt-2 rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-xs text-warning">{typed.warning}</div> : null}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <span className={`chip ${typed.status === "success" ? "success" : "warning"}`}>{typed.status}</span>
-              <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
-                {typed.latency_seconds}s · {typed.token_count} tokens
-              </div>
+            <div className="text-right">
+              <span className={`rounded-md px-2 py-1 text-xs ${typed.status === "success" ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}`}>{typed.status}</span>
+              <div className="mt-1.5 text-xs text-muted">{typed.latency_seconds}s · {typed.token_count} tokens</div>
             </div>
           </div>
         );
       })}
-      {document ? <pre>{JSON.stringify(document, null, 2)}</pre> : null}
+      {document ? <pre className="mt-4 overflow-auto whitespace-pre-wrap rounded-md bg-surface-subtle p-3 text-xs">{JSON.stringify(document, null, 2)}</pre> : null}
     </section>
   );
 }
@@ -3102,38 +3046,45 @@ export function DiagnosticsPanel({ document, modelCalls = mockModelCalls }: Diag
 Create `apps/web/components/console/quality-sidebar.tsx`:
 
 ```tsx
+"use client";
+
 import { AlertTriangle } from "lucide-react";
+
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
 type QualitySidebarProps = {
   qualityReport?: unknown;
 };
 
 export function QualitySidebar({ qualityReport }: QualitySidebarProps) {
+  const { t } = useConsolePreferences();
   return (
-    <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-      <section className="panel quality-card">
-        <div className="donut">
-          <div className="donut-inner">9</div>
+    <div className="mt-3 grid gap-3">
+      <section className="grid grid-cols-[110px_1fr] items-center gap-4 rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <div className="grid h-24 w-24 place-items-center rounded-full bg-[conic-gradient(hsl(var(--info))_0_55%,hsl(var(--warning))_55%_82%,hsl(var(--danger))_82%_94%,hsl(var(--brand))_94%_100%)]">
+          <div className="grid h-14 w-14 place-items-center rounded-full bg-surface font-bold">9</div>
         </div>
         <div>
-          <h3>Quality Summary</h3>
-          <p>Info 5 · Warning 3 · Error 1 · Critical 0</p>
+          <h3 className="font-semibold">{t.panels.qualitySummary}</h3>
+          <p className="text-sm text-muted">Info 5 · Warning 3 · Error 1 · Critical 0</p>
         </div>
       </section>
-      <section className="panel">
-        <h3>Risk Level</h3>
-        <p className="chip warning">
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <h3 className="font-semibold">{t.panels.riskLevel}</h3>
+        <p className="mt-2 inline-flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-sm text-warning">
           <AlertTriangle size={15} />
           Warning
         </p>
-        <p>存在 3 个中等风险问题</p>
+        <p className="mt-2 text-sm text-muted">存在 3 个中等风险问题</p>
       </section>
-      <section className="panel">
-        <h3>Top Issues</h3>
-        <p>fig_3 图像清晰度较低</p>
-        <p>公式区域置信度较低 (Problem 2)</p>
-        <p>选项 C 可能存在 OCR 错误</p>
-        {qualityReport ? <pre>{JSON.stringify(qualityReport, null, 2)}</pre> : null}
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <h3 className="font-semibold">{t.panels.topIssues}</h3>
+        <div className="mt-3 grid gap-2 text-sm text-muted">
+          <p>fig_3 图像清晰度较低</p>
+          <p>公式区域置信度较低 (Problem 2)</p>
+          <p>选项 C 可能存在 OCR 错误</p>
+        </div>
+        {qualityReport ? <pre className="mt-4 overflow-auto whitespace-pre-wrap rounded-md bg-surface-subtle p-3 text-xs">{JSON.stringify(qualityReport, null, 2)}</pre> : null}
       </section>
     </div>
   );
@@ -3143,6 +3094,8 @@ export function QualitySidebar({ qualityReport }: QualitySidebarProps) {
 Create `apps/web/app/page.tsx`:
 
 ```tsx
+"use client";
+
 import { Download, RotateCcw, Share2 } from "lucide-react";
 
 import { PipelineStepper } from "@/components/console/pipeline-stepper";
@@ -3151,29 +3104,31 @@ import { StructuredPreview } from "@/components/console/structured-preview";
 import { DiagnosticsPanel } from "@/components/console/diagnostics-panel";
 import { QualitySidebar } from "@/components/console/quality-sidebar";
 import { AppShell } from "@/components/layout/app-shell";
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 
 export default function HomePage() {
+  const { t } = useConsolePreferences();
   return (
     <AppShell>
-      <main className="job-page">
-        <section className="job-header">
+      <main className="grid gap-3.5 px-7 py-4">
+        <section className="flex items-end justify-between gap-5">
           <div>
-            <a href="#" className="nav-link">Back to Jobs</a>
-            <h1>Job #20240520-0001 <span className="chip success">Completed</span></h1>
-            <div className="job-meta">
+            <a href="#" className="text-sm text-info">{t.actions.backToJobs}</a>
+            <h1 className="mt-2 text-2xl font-bold">Job #20240520-0001 <span className="rounded-md bg-success-soft px-2 py-1 text-sm text-success">Completed</span></h1>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted">
               <span>Created: 2024-05-20 10:21:03</span>
               <span>Mode: debug</span>
               <span>Policy: report_only</span>
             </div>
           </div>
-          <div className="job-actions">
-            <button className="action-button"><RotateCcw size={15} />Re-run</button>
-            <button className="action-button"><Share2 size={15} />Share</button>
-            <button className="action-button primary"><Download size={15} />Export</button>
+          <div className="flex gap-2.5">
+            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle"><RotateCcw size={15} />{t.actions.rerun}</button>
+            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle"><Share2 size={15} />{t.actions.share}</button>
+            <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm text-white"><Download size={15} />{t.actions.export}</button>
           </div>
         </section>
         <PipelineStepper />
-        <section className="workspace">
+        <section className="grid grid-cols-[minmax(330px,0.92fr)_minmax(420px,1.05fr)_minmax(380px,0.94fr)] items-start gap-3 max-[1180px]:grid-cols-1">
           <SourceImagePanel />
           <StructuredPreview />
           <div>
@@ -3318,12 +3273,13 @@ Modify `apps/web/app/page.tsx`:
 import { useState } from "react";
 import { Download, RotateCcw, Share2 } from "lucide-react";
 
+import { DiagnosticsPanel } from "@/components/console/diagnostics-panel";
 import { PipelineStepper } from "@/components/console/pipeline-stepper";
+import { QualitySidebar } from "@/components/console/quality-sidebar";
 import { SourceImagePanel } from "@/components/console/source-image-panel";
 import { StructuredPreview } from "@/components/console/structured-preview";
-import { DiagnosticsPanel } from "@/components/console/diagnostics-panel";
-import { QualitySidebar } from "@/components/console/quality-sidebar";
 import { AppShell } from "@/components/layout/app-shell";
+import { useConsolePreferences } from "@/components/providers/console-preferences-provider";
 import {
   createJob,
   getDocument,
@@ -3332,13 +3288,16 @@ import {
   listModelCalls,
   listTimeline,
   type Job,
+  type ModelCall,
+  type TimelineStep,
 } from "@/lib/api";
 
 export default function HomePage() {
+  const { t } = useConsolePreferences();
   const [job, setJob] = useState<Job | null>(null);
   const [document, setDocument] = useState<unknown>(null);
-  const [timeline, setTimeline] = useState<unknown[]>([]);
-  const [modelCalls, setModelCalls] = useState<unknown[]>([]);
+  const [timeline, setTimeline] = useState<TimelineStep[]>([]);
+  const [modelCalls, setModelCalls] = useState<ModelCall[]>([]);
   const [assets, setAssets] = useState<unknown[]>([]);
   const [qualityReport, setQualityReport] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
@@ -3365,15 +3324,21 @@ export default function HomePage() {
 
   return (
     <AppShell>
-      <main className="job-page">
-        <section className="job-header">
+      <main className="grid gap-3.5 px-7 py-4">
+        <section className="flex items-end justify-between gap-5 max-[900px]:items-start max-[900px]:flex-col">
           <div>
-            <a href="#" className="nav-link">Back to Jobs</a>
-            <h1>{job ? `Job ${job.job_id}` : "Job #20240520-0001"} <span className="chip success">{job?.status ?? "Completed"}</span></h1>
-            <div className="job-meta">
+            <a href="#" className="text-sm text-info">{t.actions.backToJobs}</a>
+            <h1 className="mt-2 text-2xl font-bold">
+              {job ? `Job ${job.job_id}` : "Job #20240520-0001"}{" "}
+              <span className="rounded-md bg-success-soft px-2 py-1 text-sm text-success">
+                {job?.status ?? "Completed"}
+              </span>
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted">
               <span>Mode: {job?.mode ?? "debug"}</span>
               <span>Policy: {job?.quality_policy ?? "report_only"}</span>
               <input
+                className="max-w-56 rounded-md border border-border bg-surface px-2 py-1 text-sm"
                 type="file"
                 accept="image/*"
                 onChange={(event) => {
@@ -3383,16 +3348,16 @@ export default function HomePage() {
                 }}
               />
             </div>
-            {error ? <p role="alert">{error}</p> : null}
+            {error ? <p className="mt-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">{error}</p> : null}
           </div>
-          <div className="job-actions">
-            <button className="action-button"><RotateCcw size={15} />Re-run</button>
-            <button className="action-button"><Share2 size={15} />Share</button>
-            <button className="action-button primary"><Download size={15} />Export</button>
+          <div className="flex gap-2.5">
+            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle"><RotateCcw size={15} />{t.actions.rerun}</button>
+            <button className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm hover:bg-surface-subtle"><Share2 size={15} />{t.actions.share}</button>
+            <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm text-white"><Download size={15} />{t.actions.export}</button>
           </div>
         </section>
         <PipelineStepper steps={timeline} />
-        <section className="workspace">
+        <section className="grid grid-cols-[minmax(330px,0.92fr)_minmax(420px,1.05fr)_minmax(380px,0.94fr)] items-start gap-3 max-[1180px]:grid-cols-1">
           <SourceImagePanel assets={assets} />
           <StructuredPreview document={document} />
           <div>
@@ -3406,7 +3371,7 @@ export default function HomePage() {
 }
 ```
 
-Update the console components so they accept optional API data and fall back to `mock-data.ts` when data is empty. Do not remove the detailed visual structure from Task 13.
+Update the console components so they accept optional API data and fall back to `mock-data.ts` when data is empty. Keep all styling in Tailwind classes and route labels through `useConsolePreferences()`.
 
 **Step 3: Build frontend**
 
@@ -3467,10 +3432,13 @@ Verify against the supplied mockup:
 
 - Top navigation contains all seven sections.
 - Debug mode and model readiness chips are visible.
+- Theme toggle switches between light and dark mode, with no unreadable contrast regressions.
+- Language toggle switches navigation, actions, panel titles, and diagnostic tab labels between Chinese and English.
 - Job header, progress stepper, source image panel, structured preview, diagnostics tabs, quality summary, risk level, and top issues are visible.
 - No text overlaps inside buttons, chips, cards, tabs, or panels.
 - Three-column layout fits a desktop viewport around 1440px wide.
 - At 1024px wide, columns remain usable or stack without clipped text.
+- No component relies on the removed `.panel`, `.chip`, `.workspace`, `.app-shell`, `.action-button`, or `.icon-button` CSS classes.
 
 **Step 4: Fix visual defects**
 
@@ -3530,6 +3498,8 @@ Open `http://127.0.0.1:3000`, upload any small PNG or JPG, and verify:
 - Document contains at least one problem and one figure asset.
 - Timeline, assets, model calls, and quality report panels populate from the API.
 - The page still visually resembles the supplied OCR Exercise Console mockup after real API data loads.
+- Chinese/English switching works after API data loads.
+- Light/dark switching works after API data loads.
 
 **Step 4: Test API export manually**
 
