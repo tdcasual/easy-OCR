@@ -3673,3 +3673,71 @@ Before executing this plan, confirm:
 - OCR sample content may stay literal Chinese because it represents extracted exercise content, not application UI.
 - Visual verification checks Chinese, English, light mode, and dark mode.
 - `storage/` runtime data remains ignored by git.
+
+---
+
+## Architecture Review Follow-up
+
+This section captures design issues discovered during an architecture review and the corresponding improvements to apply during or after the MVP implementation.
+
+### 1. `ProblemDocument` Schema
+
+| Priority | Issue | Recommended Improvement |
+|----------|-------|------------------------|
+| P0 | Blocks have no stable identity, so review issues rely on fragile `block_path` strings like `problems[0].blocks[1]`. | Add a `block_id` field to every block type (e.g., `blk_<uuid>`) and use it as the primary reference target for issues and edits. |
+| P0 | `Problem.figures` duplicates information already present in `FigureRefBlock`. | Remove `Problem.figures` and derive figure references by scanning `blocks`. Add a validation helper to ensure consistency. |
+| P0 | `FigureVersion.path` exposes filesystem details and will break when switching to object storage. | Replace the raw `path: str` with an `AssetReference` abstraction containing `asset_id`, `uri`, `mime_type`, and dimensions. |
+| P1 | `TextBlock` cannot represent inline formulas inside a paragraph. | Reserve an inline content model for future use; keep MVP paragraphs as plain text but design `children: list[InlineContent]` as the next schema version. |
+| P1 | `schema_version` is a string with no migration/validation strategy. | Maintain a `SUPPORTED_SCHEMA_VERSIONS` set and reject unknown versions with a clear error; document upgrade rules between versions. |
+| P2 | `source_image` assumes a single source image. | Keep single image for MVP, but design `source_images: list[SourceImage]` with `kind` (original/preprocessed) for future multi-page or multi-crop scenarios. |
+
+### 2. Renderer Protocol & Export System
+
+| Priority | Issue | Recommended Improvement |
+|----------|-------|------------------------|
+| P0 | Design document defines `async def render(document, options) -> ExportArtifact`, but MVP plan uses `render_to_string(document) -> str`. | Adopt the design-document protocol from the start; do not downgrade to a string-only renderer. |
+| P0 | Renderers cannot resolve figure assets, so HTML/Markdown figure output is broken or placeholder-only. | Introduce `RenderContext` containing `options: ExportOptions`, `asset_resolver: Callable[[figure_id, version_kind], str]`, `base_url`, and `renderer_version`. |
+| P0 | `ExportArtifact` lacks renderer version, figure mode, creation time, and asset dependencies. | Extend `ExportArtifact` with `renderer_version`, `figure_mode`, `created_at`, and `asset_ids` to guarantee reproducibility. |
+| P1 | `ExportOptions.figure_mode: str` is not type-safe. | Convert `figure_mode` to a `StrEnum` with values such as `selected`, `original`, `enhanced`, and `all`. |
+| P1 | Markdown figure syntax uses an invalid placeholder URL (`![fig_1](fig_1)`). | Resolve figure refs through `RenderContext.asset_resolver` to produce valid URLs or base64 data URIs. |
+| P2 | There is no multi-file bundle export mode for DOCX/PDF. | Define an `ExportBundle` model (`primary: str`, `assets: dict[str, bytes]`) for renderers that need to return multiple files. |
+
+### 3. Model Client & Audit Logging
+
+| Priority | Issue | Recommended Improvement |
+|----------|-------|------------------------|
+| P0 | MVP `NoopModelClient` only exposes `role()` and does not match the design-document `ModelClient` interface. | Implement a `MockModelClient` with the four async methods (`ocr_image`, `structure_problem_document`, `judge_figure_quality`, `enhance_figure`) returning mock data, so the pipeline calls real interfaces. |
+| P0 | `ModelCallRead.input_assets` mixes paths, filenames, and figure IDs. | Standardize on `asset_id` references and resolve them through the asset service. |
+| P1 | `ModelRoleConfig` only contains `model` and `api_base`. | Add `temperature`, `max_tokens`, `timeout_seconds`, and `fallback_models` so behavior is configurable per role. |
+| P1 | Model-call `status: str` is loosely typed and misses error categories. | Define `ModelCallStatus` enum: `success`, `warning`, `rate_limited`, `timeout`, `parse_error`, `provider_error`, `fallback_used`. |
+| P1 | Prompt version management is mentioned but not implemented. | Store prompts under `app/prompts/<role>/<version>.txt`, load them through a `PromptRegistry`, and record both `prompt_version` and `prompt_hash` in model-call logs. |
+| P2 | Large binary model responses are not persisted. | Save raw responses as assets under `storage/model_calls/<call_id>/` and store references (not payloads) in the database. |
+
+### 4. Review Issue Workflow
+
+| Priority | Issue | Recommended Improvement |
+|----------|-------|------------------------|
+| P0 | `block_path` is a fragile string reference that breaks when document versions change. | Replace `block_path` with `block_id` after adding block IDs; optionally introduce a polymorphic `ReviewTarget` discriminator. |
+| P0 | `ReviewIssueRead` inherits from `ReviewIssueCreate`, leaking create-time defaults and making read schema implicit. | Define `ReviewIssueRead` explicitly with read-only fields plus `issue_id`, `status`, `created_at`, and `updated_at`. |
+| P0 | Issues do not record the document version where the problem was observed. | Add `document_version: int | None = None` to `ReviewIssueCreate` and `ReviewIssueRead`. |
+| P1 | `severity: str` is not an enum. | Convert to `Severity` StrEnum: `info`, `warning`, `error`, `critical`. |
+| P1 | The regression-fixture loop lacks tooling. | Define fixture layout under `tests/fixtures/issues/<issue_id>/` with `input.png`, `expected_document.json`, and `expected_export.md`; add a CLI/script to rerun an issue. |
+| P1 | `affects_auto_export` is manually set and inconsistent. | Provide a default derived from `severity` and `issue_type`, while still allowing manual override. |
+| P2 | There is no issue deduplication/aggregation mechanism. | Add an optional `signature` field (hash of type + target pattern) and a future issue-clustering service. |
+
+### 5. Cross-Cutting Concerns
+
+- **Repository interface:** Define a `Repository` Protocol early so the in-memory implementation can be swapped for SQLModel/PostgreSQL without touching API handlers.
+- **Async pipeline:** The current job creation runs the mock pipeline synchronously. Preserve job-state transitions and design the worker boundary so an in-process worker can later be replaced by RQ/arq/Celery.
+- **Upload validation:** Add file-size limits, MIME-type whitelisting, and optional content scanning before writing to `storage/uploads/`.
+- **Asset retention:** Define deletion and retention policies for uploads, assets, exports, and model-call raw responses.
+
+### Suggested Plan Updates
+
+1. **Task 2 (Canonical Pydantic Schemas):** Add `block_id` to all block types; remove `Problem.figures`; introduce `AssetReference`; add `document_version` to review-issue schemas.
+2. **Task 7 (Renderer Registry):** Implement `RenderContext` and use the design-document `render(document, context) -> ExportArtifact` protocol; extend `ExportArtifact` with reproducibility metadata.
+3. **Task 9 (Review Issue API):** Define explicit `ReviewIssueRead`; replace `block_path` with `block_id`; add `Severity` enum.
+4. **Task 10 (Model Client):** Implement `MockModelClient` with the four design-document methods; standardize `input_assets` on `asset_id`; add `ModelRoleConfig` extensions.
+5. **New Task (optional):** Add a regression-fixture layout and rerun script for high-value review issues.
+
+These improvements keep the MVP scope intact while removing design debt that would otherwise compound when real OCR, persistent storage, and additional export formats are introduced.

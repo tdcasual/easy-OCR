@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.exports import router as exports_router
 from app.api.jobs import router as jobs_router
@@ -8,6 +9,13 @@ from app.core.config import get_settings
 settings = get_settings()
 
 app = FastAPI(title="easy-OCR API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(jobs_router, prefix=settings.api_prefix)
 app.include_router(exports_router, prefix=settings.api_prefix)
 app.include_router(review_issues_router, prefix=settings.api_prefix)
