@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 216 33% 97%;
+    --foreground: 222 35% 15%;
+    --surface: 0 0% 100%;
+    --surface-subtle: 210 33% 98%;
+    --border: 214 30% 90%;
+    --muted: 216 15% 45%;
+    --brand: 162 100% 33%;
+    --brand-soft: 158 64% 94%;
+    --success: 150 84% 32%;
+    --success-soft: 145 81% 96%;
+    --warning: 35 92% 45%;
+    --warning-soft: 42 100% 96%;
+    --danger: 0 84% 60%;
+    --danger-soft: 0 86% 97%;
+    --info: 214 84% 56%;
+    --info-soft: 211 100% 97%;
+    --shadow: 215 40% 18%;
+  }
+
+  .dark {
+    --background: 222 32% 8%;
+    --foreground: 210 30% 94%;
+    --surface: 222 28% 12%;
+    --surface-subtle: 221 25% 16%;
+    --border: 220 20% 24%;
+    --muted: 216 13% 68%;
+    --brand: 162 78% 44%;
+    --brand-soft: 162 42% 18%;
+    --success: 150 70% 45%;
+    --success-soft: 150 42% 18%;
+    --warning: 38 92% 56%;
+    --warning-soft: 36 44% 18%;
+    --danger: 0 84% 66%;
+    --danger-soft: 0 45% 18%;
+    --info: 214 92% 66%;
+    --info-soft: 214 44% 18%;
+    --shadow: 222 45% 4%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+}

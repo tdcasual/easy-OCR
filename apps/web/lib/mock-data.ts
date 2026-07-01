@@ -1,0 +1,45 @@
+export const mockTimeline = [
+  { key: "upload", label: "Upload", status: "completed" },
+  { key: "preprocess", label: "Preprocess", status: "completed" },
+  { key: "layout", label: "Layout", status: "completed" },
+  { key: "crop_figures", label: "Crop Figures", status: "completed" },
+  { key: "ocr", label: "OCR", status: "completed" },
+  { key: "structure", label: "Structure", status: "completed" },
+  { key: "validate", label: "Validate", status: "completed" },
+  { key: "quality", label: "Quality", status: "warning" },
+  { key: "export", label: "Export", status: "completed" },
+];
+
+export const mockModelCalls = [
+  {
+    model_call_id: "call_1",
+    role: "vision_ocr",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.2.0",
+    input_assets: ["image_preprocessed_v1.png"],
+    status: "success",
+    latency_seconds: 2.4,
+    token_count: 1204,
+  },
+  {
+    model_call_id: "call_2",
+    role: "structure",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.3.0",
+    input_assets: ["ocr_result_v1.json"],
+    status: "success",
+    latency_seconds: 1.1,
+    token_count: 2842,
+  },
+  {
+    model_call_id: "call_3",
+    role: "figure_quality",
+    model: "gpt-4o-mini",
+    prompt_version: "v1.1.0",
+    input_assets: ["fig_1_crop.png", "fig_2_crop.png"],
+    status: "warning",
+    latency_seconds: 0.8,
+    token_count: 812,
+    warning: "图像 fig_3 清晰度较低，建议增强",
+  },
+];
