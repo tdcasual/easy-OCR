@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     database_url: str = "sqlite:///./easy_ocr.sqlite3"
     storage_root: str = "../../storage"
+    vision_ocr_model: str = ""
+    structure_model: str = ""
+    figure_quality_model: str = ""
+    figure_enhance_model: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="EASY_OCR_")
 
