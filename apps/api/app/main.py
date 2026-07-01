@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.exports import router as exports_router
 from app.api.jobs import router as jobs_router
 from app.core.config import get_settings
 
@@ -7,6 +8,7 @@ settings = get_settings()
 
 app = FastAPI(title="easy-OCR API")
 app.include_router(jobs_router, prefix=settings.api_prefix)
+app.include_router(exports_router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")
