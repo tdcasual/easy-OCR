@@ -9,6 +9,7 @@ export function LanguageToggle() {
   return (
     <button
       type="button"
+      data-testid="language-toggle"
       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-subtle"
       onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}
     >
