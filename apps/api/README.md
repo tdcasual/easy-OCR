@@ -12,3 +12,20 @@ pip install -e ".[dev]"
 pytest
 uvicorn app.main:app --reload
 ```
+
+## Example
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/jobs \
+  -F mode=auto \
+  -F quality_policy=report_only \
+  -F file=@sample.png
+```
+
+Export the resulting document:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/jobs/<job_id>/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format":"markdown","options":{"figure_mode":"selected"}}'
+```
