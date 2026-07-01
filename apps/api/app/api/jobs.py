@@ -75,3 +75,35 @@ def get_document(job_id: str) -> dict:
     if not document:
         raise HTTPException(status_code=404, detail="document not found")
     return document
+
+
+@router.get("/{job_id}/assets")
+def list_assets(job_id: str) -> list[dict]:
+    document = repo.get_document(job_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document not found")
+    return document.get("assets", [])
+
+
+@router.get("/{job_id}/quality-report")
+def get_quality_report(job_id: str):
+    report = repo.get_quality_report(job_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="quality report not found")
+    return report
+
+
+@router.get("/{job_id}/model-calls")
+def list_model_calls(job_id: str):
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return repo.list_model_calls(job_id)
+
+
+@router.get("/{job_id}/timeline")
+def get_timeline(job_id: str):
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return repo.get_timeline(job_id)
