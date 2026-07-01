@@ -1,0 +1,1 @@
+"""easy-OCR API package."""
