@@ -31,10 +31,17 @@ storage/tmp/*
 !storage/exports/.gitkeep
 !storage/tmp/.gitkeep
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Logs and local databases
 *.log
 *.sqlite
 *.sqlite3
+
+# Model-call raw responses (keep directory with .gitkeep)
+storage/model_calls/*
+!storage/model_calls/.gitkeep
 
 # macOS
 .DS_Store

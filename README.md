@@ -10,36 +10,82 @@ The project focuses on:
 - Extensible exports such as Markdown, HTML, LaTeX, and Word.
 - A frontend debugging console for OCR inspection, review issues, and export validation.
 
-The current project state is design-first. See:
+## Repository Status
+
+The MVP implementation is complete and verified:
+
+- FastAPI backend with job upload, document generation, export rendering, and review-issue APIs.
+- Next.js debugging console wired to the backend.
+- End-to-end smoke test covering upload, document preview, and export creation.
+
+See the design documents for the long-term architecture:
 
 - [OCR Exercise API Design](docs/plans/2026-05-20-ocr-exercise-api-design.md)
+- [MVP Implementation Plan](docs/plans/2026-05-20-easy-ocr-mvp-implementation.md)
 
-## Planned Stack
+## Stack
 
-- Backend: FastAPI, Pydantic v2, LiteLLM, Pillow/OpenCV.
-- Frontend: Next.js, TypeScript, TanStack Query.
-- Storage: local filesystem for MVP, replaceable with object storage later.
+- **Backend:** FastAPI, Pydantic v2, SQLModel (declared; in-memory store used for MVP).
+- **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS v3.
+- **Storage:** local filesystem for MVP, replaceable with object storage later.
 
-## MVP API Flow
+## Quick Start
+
+### Backend
 
 ```bash
 cd apps/api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Open `http://127.0.0.1:8000/docs`.
 
-## MVP Smoke Test
+### Frontend
 
-1. Start the API from `apps/api`.
-2. Start the web console from `apps/web`.
-3. Upload an image.
-4. Confirm the job completes and the document JSON contains `schema_version`, `document_version`, `problems`, and `assets`.
-5. Create a Markdown or HTML export through the API.
+```bash
+cd apps/web
+npm install
+npm run build
+npm start
+```
 
-## Repository Status
+The console expects the API at `http://127.0.0.1:8000/api` by default. To override it:
 
-This repository has been initialized for the first implementation pass. Application code will live under `apps/api` and `apps/web`.
+```bash
+NEXT_PUBLIC_API_BASE=http://your-api-host/api npm run build
+```
+
+## Verification
+
+```bash
+# Backend tests
+cd apps/api
+pytest -q
+
+# Frontend typecheck + production build
+cd apps/web
+npm run check
+
+# End-to-end smoke test (requires both servers running)
+cd apps/web
+node scripts/e2e-smoke.js
+```
+
+## Repository Layout
+
+```text
+apps/
+  api/          FastAPI application
+  web/          Next.js debugging console
+docs/
+  plans/        Architecture and implementation plans
+storage/
+  uploads/      Uploaded source images
+  assets/       Extracted figure crops
+  exports/      Generated export artifacts
+  tmp/          Temporary files
+  model_calls/  Raw model responses (created when feature enabled)
+```
