@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -59,3 +61,42 @@ def test_create_job_rejects_missing_content_type():
     )
 
     assert response.status_code == 415
+
+
+def test_get_asset_returns_selected_version_file():
+    storage_root = Path("../../storage").resolve()
+    asset_path = storage_root / "assets" / "mock-figure.png"
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"png-bytes")
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/jobs",
+            data={"mode": "auto", "quality_policy": "report_only"},
+            files={"file": ("exercise.png", b"fake-image", "image/png")},
+        )
+        job_id = response.json()["job_id"]
+        document = client.get(f"/api/jobs/{job_id}/document").json()
+        figure_id = document["assets"][0]["figure_id"]
+
+        asset_response = client.get(f"/api/jobs/{job_id}/assets/{figure_id}")
+
+        assert asset_response.status_code == 200
+        assert asset_response.content == b"png-bytes"
+    finally:
+        asset_path.unlink(missing_ok=True)
+
+
+def test_get_asset_returns_404_for_unknown_figure():
+    client = TestClient(app)
+    response = client.post(
+        "/api/jobs",
+        data={"mode": "auto", "quality_policy": "report_only"},
+        files={"file": ("exercise.png", b"fake-image", "image/png")},
+    )
+    job_id = response.json()["job_id"]
+
+    asset_response = client.get(f"/api/jobs/{job_id}/assets/nonexistent")
+
+    assert asset_response.status_code == 404

@@ -1,7 +1,9 @@
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.core.config import Settings, get_settings
 from app.schemas.job import JobMode, JobRead, JobStatus, QualityPolicy
@@ -99,6 +101,33 @@ def list_assets(job_id: str) -> list[dict]:
     if not document:
         raise HTTPException(status_code=404, detail="document not found")
     return document.get("assets", [])
+
+
+@router.get("/{job_id}/assets/{figure_id}")
+def get_asset(job_id: str, figure_id: str) -> FileResponse:
+    document = repo.get_document(job_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    assets = document.get("assets", [])
+    asset = next((a for a in assets if a.get("figure_id") == figure_id), None)
+    if not asset:
+        raise HTTPException(status_code=404, detail="asset not found")
+
+    selected_version_id = asset.get("selected_version")
+    version = next(
+        (v for v in asset.get("versions", []) if v.get("version_id") == selected_version_id),
+        None,
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="asset version not found")
+
+    settings = get_settings()
+    file_path = Path(settings.storage_root) / version["path"]
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="asset file not found")
+
+    return FileResponse(file_path)
 
 
 @router.get("/{job_id}/quality-report")
