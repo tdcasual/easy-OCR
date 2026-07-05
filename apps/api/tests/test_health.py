@@ -13,3 +13,18 @@ def test_health_returns_ok():
         "status": "ok",
         "service": "easy-ocr-api",
     }
+
+
+def test_cors_preflight_allows_configured_origin():
+    client = TestClient(app)
+
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://127.0.0.1:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:3000"

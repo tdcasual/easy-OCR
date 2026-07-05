@@ -1,8 +1,9 @@
+import asyncio
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.schemas.job import JobMode, JobRead, JobStatus, QualityPolicy
 from app.services.mock_pipeline import MockOcrPipeline
 from app.services.repository import InMemoryRepository
@@ -10,6 +11,13 @@ from app.services.storage import LocalStorage
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 repo = InMemoryRepository()
+
+
+def _allowed_content_types(settings: Settings) -> set[str]:
+    allowed = {ct.strip().lower() for ct in settings.upload_content_types.split(",") if ct.strip()}
+    if "image/jpeg" in allowed:
+        allowed.add("image/jpg")
+    return allowed
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
@@ -21,8 +29,16 @@ async def create_job(
     settings = get_settings()
     storage = LocalStorage(settings.storage_root)
     content = await file.read()
+
+    if len(content) > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="upload too large")
+
+    allowed = _allowed_content_types(settings)
+    if not file.content_type or file.content_type.lower() not in allowed:
+        raise HTTPException(status_code=415, detail="unsupported content type")
+
     filename = storage.unique_name(file.filename or "upload.png")
-    stored = storage.write_bytes("uploads", filename, content)
+    stored = await asyncio.to_thread(storage.write_bytes, "uploads", filename, content)
 
     job_id = f"job_{uuid4().hex}"
     source_image_id = f"src_{uuid4().hex}"
