@@ -2,6 +2,11 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+// Keep Chrome's temporary profile/cache on the project disk to avoid /tmp quotas.
+const chromeTmpDir = path.join(__dirname, '../tmp/chrome-tmp');
+fs.mkdirSync(chromeTmpDir, { recursive: true });
+process.env.TMPDIR = chromeTmpDir;
+
 (async () => {
   // Create a small test image
   const testImagePath = path.join(__dirname, '../tmp/smoke-test.png');
@@ -10,8 +15,23 @@ const path = require('path');
   const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   fs.writeFileSync(testImagePath, Buffer.from(pngBase64, 'base64'));
 
-  const browser = await chromium.launch({ channel: 'chrome' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const profileDir = path.join(__dirname, '../tmp/playwright-profile');
+  const cacheDir = path.join(__dirname, '../tmp/chrome-cache');
+  fs.rmSync(profileDir, { recursive: true, force: true });
+  fs.mkdirSync(profileDir, { recursive: true });
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const context = await chromium.launchPersistentContext(profileDir, {
+    channel: 'chrome',
+    args: [
+      '--no-sandbox',
+      '--disable-gpu',
+      `--disk-cache-dir=${cacheDir}`,
+      '--disable-features=SharedDictionary,InterestFeedContentSuggestions',
+      '--disable-background-networking',
+    ],
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = context.pages()[0] || await context.newPage();
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
   page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
   page.on('request', request => console.log('REQUEST:', request.method(), request.url()));
@@ -84,7 +104,7 @@ const path = require('path');
 
   await page.screenshot({ path: 'tmp/e2e-smoke.png', fullPage: false });
 
-  await browser.close();
+  await context.close();
 
   if (!hasSchemaVersion || !hasDocumentVersion || !hasProblems || !hasAssets || !hasMarkdownFormat || !exportCreated) {
     console.error('E2E smoke test failed');
