@@ -17,7 +17,6 @@ class MarkdownRenderer:
     file_extension = "md"
 
     def render(self, document: ProblemDocument, context: RenderContext) -> ExportArtifact:
-        content = self.render_to_string(document, context)
         return ExportArtifact(
             export_id="",
             job_id="",

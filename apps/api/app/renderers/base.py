@@ -26,3 +26,6 @@ class Renderer(Protocol):
 
     def render(self, document: ProblemDocument, context: RenderContext) -> ExportArtifact:
         ...
+
+    def render_to_string(self, document: ProblemDocument, context: RenderContext) -> str:
+        ...

@@ -2,7 +2,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _new_block_id() -> str:
@@ -101,6 +101,14 @@ class FigureAsset(BaseModel):
     needs_review: bool = False
     metadata: dict = Field(default_factory=dict)
     provenance: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _selected_version_must_exist(self):
+        if self.versions:
+            version_ids = {v.version_id for v in self.versions}
+            if self.selected_version not in version_ids:
+                raise ValueError(f"selected_version {self.selected_version!r} not found in versions")
+        return self
 
 
 class Problem(BaseModel):

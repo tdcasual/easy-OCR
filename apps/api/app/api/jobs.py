@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -69,12 +70,19 @@ async def create_job(
     repo.set_model_calls(job_id, result.model_calls)
     repo.set_timeline(job_id, result.timeline)
 
+    quality_summary: dict[str, int] = {}
+    for item in result.quality_report.items:
+        key = item.severity.value
+        quality_summary[key] = quality_summary.get(key, 0) + 1
+
+    now = datetime.now(timezone.utc)
     completed = job.model_copy(
         update={
             "status": JobStatus.COMPLETED,
             "progress": 1,
             "latest_document_version": result.document.document_version,
-            "quality_summary": {"info": len(result.quality_report.items)},
+            "quality_summary": quality_summary,
+            "updated_at": now,
         }
     )
     repo.save_job(completed)
@@ -117,7 +125,12 @@ def update_document(job_id: str, update: DocumentUpdateRequest) -> dict:
     payload = new_document.model_dump(mode="json")
     repo.set_document(job_id, payload)
 
-    updated_job = job.model_copy(update={"latest_document_version": next_version})
+    updated_job = job.model_copy(
+        update={
+            "latest_document_version": next_version,
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
     repo.save_job(updated_job)
     return payload
 

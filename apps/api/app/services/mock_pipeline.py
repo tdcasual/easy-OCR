@@ -21,6 +21,7 @@ from app.schemas.job import (
     QualityPolicy,
     QualityReport,
     TimelineStep,
+    TimelineStepStatus,
 )
 
 
@@ -133,15 +134,20 @@ class MockOcrPipeline:
             ),
         ]
         timeline = [
-            TimelineStep(key="upload", label="Upload", status="completed"),
-            TimelineStep(key="preprocess", label="Preprocess", status="completed"),
-            TimelineStep(key="layout", label="Layout", status="completed"),
-            TimelineStep(key="crop_figures", label="Crop Figures", status="completed"),
-            TimelineStep(key="ocr", label="OCR", status="completed"),
-            TimelineStep(key="structure", label="Structure", status="completed"),
-            TimelineStep(key="validate", label="Validate", status="completed"),
-            TimelineStep(key="quality", label="Quality", status="warning", warning="Medium figure confidence"),
-            TimelineStep(key="export", label="Export", status="completed"),
+            TimelineStep(key="upload", label="Upload", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="preprocess", label="Preprocess", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="layout", label="Layout", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="crop_figures", label="Crop Figures", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="ocr", label="OCR", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="structure", label="Structure", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(key="validate", label="Validate", status=TimelineStepStatus.COMPLETED),
+            TimelineStep(
+                key="quality",
+                label="Quality",
+                status=TimelineStepStatus.WARNING,
+                warning="Medium figure confidence",
+            ),
+            TimelineStep(key="export", label="Export", status=TimelineStepStatus.COMPLETED),
         ]
         return PipelineResult(
             document=document,

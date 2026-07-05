@@ -1,6 +1,11 @@
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class FigureMode(StrEnum):
@@ -32,3 +37,4 @@ class ExportArtifact(BaseModel):
     renderer_version: str = "0.1.0"
     figure_mode: FigureMode = FigureMode.SELECTED
     warnings: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_now)

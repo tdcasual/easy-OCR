@@ -12,6 +12,8 @@ from app.services.storage import LocalStorage
 
 router = APIRouter(tags=["exports"])
 
+_default_registry = build_default_registry()
+
 
 def _asset_resolver(job_id: str) -> callable:
     def resolve(figure_id: str) -> str:
@@ -22,7 +24,7 @@ def _asset_resolver(job_id: str) -> callable:
 
 @router.get("/export-formats")
 def list_export_formats() -> list[dict[str, str]]:
-    return build_default_registry().list_formats()
+    return _default_registry.list_formats()
 
 
 @router.get("/exports/{export_id}", response_model=ExportArtifact)
@@ -40,9 +42,8 @@ def create_export(job_id: str, request: ExportRequest) -> ExportArtifact:
         raise HTTPException(status_code=404, detail="document not found")
 
     document = ProblemDocument.model_validate(document_payload)
-    registry = build_default_registry()
     try:
-        renderer = registry.get(request.format)
+        renderer = _default_registry.get(request.format)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

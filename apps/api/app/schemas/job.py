@@ -1,8 +1,13 @@
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from app.schemas.common import Severity
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class JobMode(StrEnum):
@@ -52,6 +57,8 @@ class JobRead(BaseModel):
     latest_document_version: int | None = None
     quality_summary: dict = Field(default_factory=dict)
     error: str | None = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
 
 
 class ModelCallStatus(StrEnum):
@@ -70,14 +77,22 @@ class ModelCallRead(BaseModel):
     model: str
     prompt_version: str
     input_assets: list[str] = Field(default_factory=list)
-    status: ModelCallStatus | str
+    status: ModelCallStatus
     latency_seconds: float | None = None
     token_count: int | None = None
     warning: str | None = None
 
 
+class TimelineStepStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    WARNING = "warning"
+    FAILED = "failed"
+
+
 class TimelineStep(BaseModel):
     key: str
     label: str
-    status: str
+    status: TimelineStepStatus
     warning: str | None = None
