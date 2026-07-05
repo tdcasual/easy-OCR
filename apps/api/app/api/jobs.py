@@ -170,6 +170,28 @@ def get_asset(job_id: str, figure_id: str) -> FileResponse:
     return FileResponse(file_path)
 
 
+@router.get("/{job_id}/source-image")
+def get_source_image(job_id: str) -> FileResponse:
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    document = repo.get_document(job_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    source_path = document.get("source_image", {}).get("path")
+    if not source_path:
+        raise HTTPException(status_code=404, detail="source image not found")
+
+    settings = get_settings()
+    file_path = Path(settings.storage_root) / source_path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="source image file not found")
+
+    return FileResponse(file_path)
+
+
 @router.get("/{job_id}/quality-report")
 def get_quality_report(job_id: str):
     report = repo.get_quality_report(job_id)

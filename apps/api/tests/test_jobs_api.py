@@ -102,6 +102,22 @@ def test_get_asset_returns_404_for_unknown_figure():
     assert asset_response.status_code == 404
 
 
+def test_get_source_image_returns_uploaded_file():
+    client = TestClient(app)
+    image = b"fake-image"
+    response = client.post(
+        "/api/jobs",
+        data={"mode": "auto", "quality_policy": "report_only"},
+        files={"file": ("exercise.png", image, "image/png")},
+    )
+    job_id = response.json()["job_id"]
+
+    source_response = client.get(f"/api/jobs/{job_id}/source-image")
+
+    assert source_response.status_code == 200
+    assert source_response.content == image
+
+
 def test_patch_document_creates_new_version():
     client = TestClient(app)
     response = client.post(
