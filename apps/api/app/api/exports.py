@@ -25,6 +25,14 @@ def list_export_formats() -> list[dict[str, str]]:
     return build_default_registry().list_formats()
 
 
+@router.get("/exports/{export_id}", response_model=ExportArtifact)
+def get_export(export_id: str) -> ExportArtifact:
+    artifact = repo.get_export(export_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="export not found")
+    return artifact
+
+
 @router.post("/jobs/{job_id}/exports", response_model=ExportArtifact, status_code=status.HTTP_201_CREATED)
 def create_export(job_id: str, request: ExportRequest) -> ExportArtifact:
     document_payload = repo.get_document(job_id)

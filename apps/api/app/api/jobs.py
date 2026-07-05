@@ -4,8 +4,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
+from app.schemas.document import DocumentUpdateRequest, ProblemDocument
 from app.schemas.job import JobMode, JobRead, JobStatus, QualityPolicy
 from app.services.mock_pipeline import MockOcrPipeline
 from app.services.repository import InMemoryRepository
@@ -93,6 +95,31 @@ def get_document(job_id: str) -> dict:
     if not document:
         raise HTTPException(status_code=404, detail="document not found")
     return document
+
+
+@router.patch("/{job_id}/document")
+def update_document(job_id: str, update: DocumentUpdateRequest) -> dict:
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    current = repo.get_document(job_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    try:
+        new_document = ProblemDocument.model_validate(update.document)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from exc
+
+    next_version = current.get("document_version", 1) + 1
+    new_document.document_version = next_version
+    payload = new_document.model_dump(mode="json")
+    repo.set_document(job_id, payload)
+
+    updated_job = job.model_copy(update={"latest_document_version": next_version})
+    repo.save_job(updated_job)
+    return payload
 
 
 @router.get("/{job_id}/assets")

@@ -55,5 +55,8 @@ class InMemoryRepository:
         self.review_issues[issue.issue_id] = issue
         return issue
 
+    def get_review_issue(self, issue_id: str) -> ReviewIssueRead | None:
+        return self.review_issues.get(issue_id)
+
     def list_review_issues(self) -> list[ReviewIssueRead]:
         return list(self.review_issues.values())

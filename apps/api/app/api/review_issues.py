@@ -1,10 +1,15 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.api.jobs import repo
-from app.schemas.review_issue import ReviewIssueCreate, ReviewIssueRead, ReviewIssueStatus
+from app.schemas.review_issue import (
+    ReviewIssueCreate,
+    ReviewIssueRead,
+    ReviewIssueStatus,
+    ReviewIssueStatusUpdate,
+)
 
 router = APIRouter(prefix="/review-issues", tags=["review-issues"])
 
@@ -43,3 +48,26 @@ def create_review_issue(payload: ReviewIssueCreate) -> ReviewIssueRead:
 @router.get("", response_model=list[ReviewIssueRead])
 def list_review_issues() -> list[ReviewIssueRead]:
     return repo.list_review_issues()
+
+
+@router.get("/{issue_id}", response_model=ReviewIssueRead)
+def get_review_issue(issue_id: str) -> ReviewIssueRead:
+    issue = repo.get_review_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="issue not found")
+    return issue
+
+
+@router.patch("/{issue_id}", response_model=ReviewIssueRead)
+def update_review_issue_status(issue_id: str, update: ReviewIssueStatusUpdate) -> ReviewIssueRead:
+    issue = repo.get_review_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="issue not found")
+
+    updated = issue.model_copy(
+        update={
+            "status": update.status,
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
+    return repo.save_review_issue(updated)

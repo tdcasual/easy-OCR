@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.exports import router as exports_router
 from app.api.jobs import router as jobs_router
+from app.api.models import router as models_router
 from app.api.review_issues import router as review_issues_router
 from app.core.config import get_settings
 
@@ -19,6 +20,7 @@ app.add_middleware(
 app.include_router(jobs_router, prefix=settings.api_prefix)
 app.include_router(exports_router, prefix=settings.api_prefix)
 app.include_router(review_issues_router, prefix=settings.api_prefix)
+app.include_router(models_router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")

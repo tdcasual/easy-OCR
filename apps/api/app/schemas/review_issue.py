@@ -72,3 +72,7 @@ class ReviewIssueRead(BaseModel):
     export_id: str | None = None
     document_version: int | None = None
     labels: list[str] = Field(default_factory=list)
+
+
+class ReviewIssueStatusUpdate(BaseModel):
+    status: ReviewIssueStatus

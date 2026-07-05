@@ -30,3 +30,23 @@ def test_list_export_formats():
 
     assert response.status_code == 200
     assert {"format": "markdown", "mime_type": "text/markdown", "file_extension": "md"} in response.json()
+
+
+def test_get_export_by_id():
+    client = TestClient(app)
+    job_response = client.post(
+        "/api/jobs",
+        files={"file": ("exercise.png", b"fake-image", "image/png")},
+    )
+    job_id = job_response.json()["job_id"]
+
+    export_response = client.post(
+        f"/api/jobs/{job_id}/exports",
+        json={"format": "markdown"},
+    )
+    export_id = export_response.json()["export_id"]
+
+    get_response = client.get(f"/api/exports/{export_id}")
+
+    assert get_response.status_code == 200
+    assert get_response.json()["export_id"] == export_id

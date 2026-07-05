@@ -33,3 +33,44 @@ def test_create_and_list_review_issue():
     list_response = client.get("/api/review-issues")
     assert list_response.status_code == 200
     assert any(item["issue_id"] == issue["issue_id"] for item in list_response.json())
+
+
+def test_get_review_issue_by_id():
+    client = TestClient(app)
+    create_response = client.post(
+        "/api/review-issues",
+        json={
+            "title": "Formula OCR mistake",
+            "description": "x^2 was recognized as x2",
+            "issue_type": "formula_error",
+            "severity": "error",
+        },
+    )
+    issue_id = create_response.json()["issue_id"]
+
+    get_response = client.get(f"/api/review-issues/{issue_id}")
+
+    assert get_response.status_code == 200
+    assert get_response.json()["issue_id"] == issue_id
+
+
+def test_update_review_issue_status():
+    client = TestClient(app)
+    create_response = client.post(
+        "/api/review-issues",
+        json={
+            "title": "Formula OCR mistake",
+            "description": "x^2 was recognized as x2",
+            "issue_type": "formula_error",
+            "severity": "error",
+        },
+    )
+    issue_id = create_response.json()["issue_id"]
+
+    patch_response = client.patch(
+        f"/api/review-issues/{issue_id}",
+        json={"status": "resolved"},
+    )
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["status"] == "resolved"

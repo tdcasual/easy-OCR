@@ -133,3 +133,7 @@ ChoiceItem.model_rebuild()
 ChoicesBlock.model_rebuild()
 Problem.model_rebuild()
 ProblemDocument.model_rebuild()
+
+
+class DocumentUpdateRequest(BaseModel):
+    document: dict

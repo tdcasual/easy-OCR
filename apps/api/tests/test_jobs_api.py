@@ -100,3 +100,28 @@ def test_get_asset_returns_404_for_unknown_figure():
     asset_response = client.get(f"/api/jobs/{job_id}/assets/nonexistent")
 
     assert asset_response.status_code == 404
+
+
+def test_patch_document_creates_new_version():
+    client = TestClient(app)
+    response = client.post(
+        "/api/jobs",
+        data={"mode": "auto", "quality_policy": "report_only"},
+        files={"file": ("exercise.png", b"fake-image", "image/png")},
+    )
+    job_id = response.json()["job_id"]
+    document = client.get(f"/api/jobs/{job_id}/document").json()
+    document["problems"][0]["blocks"][0]["text"] = "updated text"
+
+    patch_response = client.patch(
+        f"/api/jobs/{job_id}/document",
+        json={"document": document},
+    )
+
+    assert patch_response.status_code == 200
+    patched = patch_response.json()
+    assert patched["document_version"] == 2
+    assert patched["problems"][0]["blocks"][0]["text"] == "updated text"
+
+    job_response = client.get(f"/api/jobs/{job_id}")
+    assert job_response.json()["latest_document_version"] == 2
