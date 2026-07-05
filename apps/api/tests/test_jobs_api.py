@@ -26,7 +26,7 @@ def test_create_job_uploads_image_and_returns_completed_document():
 
 def test_create_job_rejects_oversized_upload():
     client = TestClient(app)
-    oversized = b"x" * (10 * 1024 * 1024 + 1)
+    oversized = b"x" * (512 * 1024 + 1)
 
     response = client.post(
         "/api/jobs",

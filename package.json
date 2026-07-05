@@ -1,0 +1,13 @@
+{
+  "name": "easy-ocr",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "api:dev": "cd apps/api && . .venv/bin/activate && uvicorn app.main:app --reload",
+    "api:test": "cd apps/api && . .venv/bin/activate && pytest -q",
+    "web:dev": "cd apps/web && npm run dev",
+    "web:check": "cd apps/web && npm run check",
+    "web:smoke": "cd apps/web && node scripts/e2e-smoke.js",
+    "test": "npm run api:test && npm run web:check"
+  }
+}

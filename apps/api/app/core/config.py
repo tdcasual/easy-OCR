@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     figure_quality_model: str = ""
     figure_enhance_model: str = ""
     cors_origins: str = "http://127.0.0.1:3000"
-    max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
+    max_upload_bytes: int = 512 * 1024  # 512 KB (Starlette default max_part_size is 1 MB)
     upload_content_types: str = "image/png,image/jpeg,image/webp"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="EASY_OCR_")

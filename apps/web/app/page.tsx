@@ -29,7 +29,7 @@ import type {
 } from "@/lib/types";
 
 const ALLOWED_FILE_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = 512 * 1024;
 
 function getStatusClasses(status: Job["status"]): string {
   switch (status) {
